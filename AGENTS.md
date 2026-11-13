@@ -7,3 +7,13 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+## publik API
+- Base URL: https://publikhq.com/api/v1 (OpenAI Chat Completions, Responses, Anthropic Messages)
+- Models: publik-fast, publik-balanced, publik-smart only; never a vendor model name
+- Sign in with publik: the gate (`src/lib/server/gate.ts`, UI `src/components/app/gate.tsx`) runs before any app screen; it also sends usage telemetry (`src/lib/server/publik.ts`)
+- Key: per-browser-session `pk_` from POST /installs, stored AES-GCM encrypted in Postgres, never sent to the browser; env PUBLIK_API_KEY / PUBLIK_API_BASE_URL override
+- App token: PUBLIK_APP_TOKEN (server env, hosted deployment)
+- 402: show error.message plus error.top_up_url only
+- Never print or log a key
+- Docs: https://publikhq.com/llms.txt, https://publikhq.com/developers, https://publikhq.com/skills/api.md

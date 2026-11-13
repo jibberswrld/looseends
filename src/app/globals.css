@@ -1,26 +1,152 @@
 @import "tailwindcss";
 
+/*
+  LooseEnds design tokens.
+  One accent (teal). Amber is reserved for "needs your review" state, red for overdue/failed.
+  Radius rule: cards/sheets 16px (rounded-2xl), buttons + inputs 12px (rounded-xl), chips full pill.
+  Theme follows the system (prefers-color-scheme).
+*/
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --bg: #f4f5f3;
+  --surface: #fcfcfb;
+  --surface-2: #eef0ed;
+  --ink: #13171a;
+  --ink-2: #3a4247;
+  --muted: #5d676d;
+  --line: rgb(19 23 26 / 0.09);
+  --line-strong: rgb(19 23 26 / 0.16);
+  --accent: #0f7a6c;
+  --accent-ink: #f4fbf9;
+  --accent-hover: #0c6a5e;
+  --accent-soft: #e1efeb;
+  --accent-text: #0b6357;
+  --warn: #9a5b0b;
+  --warn-soft: #f6ead6;
+  --danger: #b4322b;
+  --danger-soft: #f7e3e1;
+  --shadow: 0 1px 2px rgb(19 40 36 / 0.05), 0 8px 24px -12px rgb(19 40 36 / 0.12);
+  --shadow-lg: 0 2px 6px rgb(19 40 36 / 0.06), 0 24px 60px -24px rgb(19 40 36 / 0.28);
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --bg: #0d1012;
+    --surface: #14181b;
+    --surface-2: #1b2024;
+    --ink: #e9eceb;
+    --ink-2: #c3cacc;
+    --muted: #949ea3;
+    --line: rgb(255 255 255 / 0.08);
+    --line-strong: rgb(255 255 255 / 0.15);
+    --accent: #2bb19c;
+    --accent-ink: #06201c;
+    --accent-hover: #3cc3ad;
+    --accent-soft: rgb(43 177 156 / 0.13);
+    --accent-text: #5fd0bd;
+    --warn: #e0a64e;
+    --warn-soft: rgb(224 166 78 / 0.13);
+    --danger: #ef7a72;
+    --danger-soft: rgb(239 122 114 / 0.12);
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -12px rgb(0 0 0 / 0.5);
+    --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.3), 0 24px 60px -24px rgb(0 0 0 / 0.7);
+    color-scheme: dark;
   }
 }
 
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-text: var(--accent-text);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --shadow-card: var(--shadow);
+  --shadow-float: var(--shadow-lg);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html {
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "ss01", "cv11";
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+/* Evidence highlight inside the source viewer */
+mark.evidence {
+  background: color-mix(in oklab, var(--accent) 22%, transparent);
+  color: inherit;
+  border-radius: 4px;
+  padding: 0 2px;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 35%, transparent);
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 25%, color-mix(in oklab, var(--surface-2) 60%, var(--surface)) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.marquee-track {
+  animation: marquee 48s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton,
+  .marquee-track {
+    animation: none;
+  }
 }
