@@ -10,7 +10,7 @@ export function LogoMark({ size = 28, className }: { size?: number; className?: 
       width={size}
       height={size}
       priority
-      className={cx("shrink-0 select-none dark:brightness-125", className)}
+      className={cx("shrink-0 select-none", className)}
     />
   );
 }

@@ -1,18 +1,17 @@
 "use client";
 
 import { AnimatePresence } from "motion/react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CaretDown } from "@phosphor-icons/react";
-import type { Task } from "@/lib/types";
-import { ManualAdd } from "@/components/app/capture";
-import { Briefing, Composer, Rail, Starters, WorkStream } from "@/components/app/home";
+import type { Me, Task } from "@/lib/types";
 import { api } from "@/components/app/api";
-import type { Me } from "@/lib/types";
 import { dayDiff, greeting, isOverdue } from "@/components/app/dates";
-import { Page } from "@/components/app/page-header";
+import { Composer, Item, Live } from "@/components/app/home";
 import { useStore } from "@/components/app/store";
-import { TaskCard, type Panel } from "@/components/app/task-card";
+import type { Panel } from "@/components/app/task-card";
 import { TaskSheet } from "@/components/app/task-sheet";
+import { useWork } from "@/components/app/work";
+import { LogoMark } from "@/components/brand";
 import { Button, Skeleton, cx } from "@/components/ui";
 
 const PRIORITY = { high: 0, normal: 1, low: 2 } as const;
@@ -23,149 +22,127 @@ const byDue = (a: Task, b: Task) =>
 
 function group(tasks: Task[]) {
   const now = new Date();
-  const g = { review: [] as Task[], overdue: [] as Task[], soon: [] as Task[], later: [] as Task[], snoozed: [] as Task[], promo: [] as Task[] };
+  const g = { overdue: [] as Task[], soon: [] as Task[], later: [] as Task[], snoozed: [] as Task[], promo: [] as Task[] };
   for (const t of tasks) {
+    const dated = t.dueAt && t.dueStatus !== "unclear";
     if (t.isPromotional) g.promo.push(t);
     else if (t.snoozedUntil && new Date(t.snoozedUntil) > now) g.snoozed.push(t);
-    else if (t.status === "detected" || t.duplicateOf || t.dueStatus === "needs_review") g.review.push(t);
-    else if (t.dueAt && t.dueStatus !== "unclear" && isOverdue(t.dueAt, t.dueAllDay, now)) g.overdue.push(t);
-    else if (t.dueAt && t.dueStatus !== "unclear" && dayDiff(t.dueAt, now) <= 7) g.soon.push(t);
+    else if (dated && isOverdue(t.dueAt!, t.dueAllDay, now)) g.overdue.push(t);
+    else if (dated && dayDiff(t.dueAt!, now) <= 7) g.soon.push(t);
     else g.later.push(t);
   }
   for (const k of Object.keys(g) as (keyof typeof g)[]) g[k].sort(byDue);
   return g;
 }
 
+const NUM = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"];
+
 export default function TodayPage() {
-  const { open, history, loadHistory, error, refresh, selectedId, select } = useStore();
+  const { open, history, error, refresh, selectedId, select } = useStore();
+  const w = useWork();
   const [panel, setPanel] = useState<Panel>("details");
   const [handle, setHandle] = useState<string | null>(null);
+  const [focus, setFocus] = useState<string | null | undefined>(undefined); // undefined = the first one, null = all closed
   const groups = useMemo(() => (open ? group(open) : null), [open]);
-  const selected = open?.find((t) => t.id === selectedId) ?? null;
-  const active = groups ? groups.review.length + groups.overdue.length + groups.soon.length + groups.later.length : 0;
+  const list = groups ? [...groups.overdue, ...groups.soon, ...groups.later] : [];
+  const selected = open?.find((t) => t.id === selectedId) ?? history?.find((t) => t.id === selectedId) ?? null;
+  const focusId = focus === undefined ? (list[0]?.id ?? null) : focus;
 
   useEffect(() => {
-    void loadHistory();
     void api<Me>("/api/me").then((m) => setHandle(m.handle)).catch(() => {});
-  }, [loadHistory]);
+  }, []);
 
   const openTask = (id: string, p: Panel = "details") => {
     setPanel(p);
     select(id);
   };
 
-  let queue: ReactNode;
-  if (error && !open) {
-    queue = (
-      <div role="alert" className="rounded-xl bg-danger-soft px-5 py-4 text-[14px] text-ink-2">
-        {error}
-        <div className="mt-3">
-          <Button size="sm" variant="secondary" onClick={() => void refresh()}>
-            Try again
-          </Button>
-        </div>
-      </div>
-    );
-  } else if (!groups) {
-    queue = (
-      <div className="space-y-3" aria-label="Loading your list">
-        {[0, 1].map((i) => (
-          <div key={i} className="rounded-xl border border-line bg-surface p-5">
-            <Skeleton className="h-5 w-1/2" />
-            <Skeleton className="mt-3 h-4 w-3/4" />
-            <Skeleton className="mt-5 h-8 w-32" />
-          </div>
-        ))}
-      </div>
-    );
-  } else if (active === 0 && !groups.snoozed.length && !groups.promo.length) {
-    queue = (
-      <div className="rounded-xl border border-dashed border-line-strong px-5 py-8 text-center">
-        <p className="text-[15px] font-[560]">{open!.length ? "You're all caught up" : "Your list is empty"}</p>
-        <p className="mx-auto mt-1 max-w-[46ch] text-[13.5px] text-muted">
-          {open!.length ? "Nothing open right now. Check your inbox or paste the next message when it lands." : "Connect Gmail or paste a message above. Whatever needs you shows up here, with the next step ready."}
+  const n = list.length;
+  const busy = !!w.running || w.lines.length > 0;
+  const empty = !!groups && n === 0;
+  const parts = groups ? [groups.overdue.length ? `${groups.overdue.length} overdue` : null, groups.soon.length ? `${groups.soon.length} due this week` : null, groups.later.length ? `${groups.later.length} later` : null].filter(Boolean) : [];
+
+  const section = (title: string, tasks: Task[], tone?: "danger") =>
+    tasks.length ? (
+      <section aria-label={title}>
+        <h2 className={cx("mb-1 px-3.5 text-[12.5px] font-medium", tone === "danger" ? "text-danger" : "text-muted")}>
+          {title} <span className="tabular-nums opacity-70">{tasks.length}</span>
+        </h2>
+        <ul className="space-y-0.5">
+          <AnimatePresence initial={false}>
+            {tasks.map((t) => (
+              <Item key={t.id} task={t} expanded={focusId === t.id} onToggle={() => setFocus(focusId === t.id ? null : t.id)} onOpen={(p) => openTask(t.id, p)} />
+            ))}
+          </AnimatePresence>
+        </ul>
+      </section>
+    ) : null;
+
+  return (
+    <main className={cx("mx-auto w-full max-w-[760px] px-4 pb-16 sm:px-6", empty && !busy ? "pt-[12vh] lg:pt-[18vh]" : "pt-10 lg:pt-14")}>
+      <header className={cx(empty && "text-center")}>
+        {empty ? <LogoMark size={40} className="mx-auto mb-5" /> : <p className="mb-2 text-[13.5px] text-muted">{greeting()}{handle ? `, ${handle}` : ""}</p>}
+        <h1 className="font-serif text-[38px] leading-[1.1] tracking-[-0.02em] sm:text-[44px]">
+          {!groups ? "Getting your list…" : empty ? (open!.length || history?.length ? "You're all caught up." : "What's on your plate?") : `${NUM[n] ?? n} ${n === 1 ? "thing needs" : "things need"} you.`}
+        </h1>
+        <p className={cx("mt-2.5 text-[15px] leading-relaxed text-ink-2", empty && "mx-auto max-w-[46ch]")}>
+          {empty ? "Give me your inbox or paste any message. I find what you need to do, write the reply, and wait for your OK before anything is sent." : parts.join(" · ")}
         </p>
-      </div>
-    );
-  } else {
-    queue = (
-      <div className="space-y-8">
-        <Section title="Needs you" hint="New or unconfirmed" tasks={groups.review} onOpen={openTask} tone="warn" />
-        <Section title="Overdue" tasks={groups.overdue} onOpen={openTask} tone="danger" />
-        <Section title="This week" tasks={groups.soon} onOpen={openTask} />
-        <Section title="Later" tasks={groups.later} onOpen={openTask} />
-        <Collapsible title="Snoozed" tasks={groups.snoozed} onOpen={openTask} />
-        <Collapsible title="Probably promotional" tasks={groups.promo} onOpen={openTask} />
-      </div>
-    );
-  }
+      </header>
 
-  return (
-    <Page wide>
-      <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="min-w-0 space-y-4">
-          <Briefing tasks={open ?? []} greeting={greeting()} handle={handle} />
-          <Composer />
-          <Starters />
-          <WorkStream onOpenTask={(id) => openTask(id)} />
-          <div className="pt-4">{queue}</div>
-          <div className="pt-1">
-            <ManualAdd />
+      <div className="mt-7">
+        <Composer hasTasks={n > 0} />
+      </div>
+
+      {busy ? (
+        <div className="mt-6">
+          <Live onOpenTask={(id) => { setFocus(id); document.getElementById(`t-${id}`)?.scrollIntoView({ block: "center", behavior: "smooth" }); }} />
+        </div>
+      ) : null}
+
+      {error && !open ? (
+        <div role="alert" className="mt-8 rounded-xl bg-danger-soft px-5 py-4 text-[14px] text-ink-2">
+          {error}
+          <div className="mt-3">
+            <Button size="sm" variant="secondary" onClick={() => void refresh()}>
+              Try again
+            </Button>
           </div>
         </div>
-        <Rail tasks={open ?? []} history={history} onOpenTask={(id) => openTask(id)} />
-      </div>
-      <TaskSheet task={selected ?? history?.find((t) => t.id === selectedId) ?? null} panel={panel} onPanel={setPanel} onClose={() => select(null)} />
-    </Page>
-  );
-}
-
-function Section({
-  title,
-  hint,
-  tasks,
-  onOpen,
-  tone,
-}: {
-  title: string;
-  hint?: string;
-  tasks: Task[];
-  onOpen: (id: string, p: Panel) => void;
-  tone?: "danger" | "warn";
-}) {
-  if (!tasks.length) return null;
-  return (
-    <section aria-label={title}>
-      <div className="mb-3 flex items-baseline gap-2.5">
-        <h2 className={cx("text-[13px] font-[560]", tone === "danger" ? "text-danger" : tone === "warn" ? "text-warn" : "text-ink-2")}>{title}</h2>
-        <span className="text-[13px] tabular-nums text-muted">{tasks.length}</span>
-        {hint ? <span className="hidden text-[13px] text-muted sm:inline">· {hint}</span> : null}
-      </div>
-      <ul className="space-y-3">
-        <AnimatePresence initial={false}>
-          {tasks.map((t) => (
-            <TaskCard key={t.id} task={t} onOpen={(p) => onOpen(t.id, p)} />
+      ) : !groups ? (
+        <div className="mt-10 space-y-3" aria-label="Loading your list">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-14" />
           ))}
-        </AnimatePresence>
-      </ul>
-    </section>
+        </div>
+      ) : (
+        <div className="mt-10 space-y-7">
+          {section("Overdue", groups.overdue, "danger")}
+          {section("This week", groups.soon)}
+          {section("Later", groups.later)}
+          <Collapsible title="Snoozed" tasks={groups.snoozed} focusId={focusId} setFocus={setFocus} onOpen={openTask} />
+          <Collapsible title="Probably marketing" tasks={groups.promo} focusId={focusId} setFocus={setFocus} onOpen={openTask} />
+        </div>
+      )}
+
+      <TaskSheet task={selected} panel={panel} onPanel={setPanel} onClose={() => select(null)} />
+    </main>
   );
 }
 
-function Collapsible({ title, tasks, onOpen }: { title: string; tasks: Task[]; onOpen: (id: string, p: Panel) => void }) {
+function Collapsible({ title, tasks, focusId, setFocus, onOpen }: { title: string; tasks: Task[]; focusId: string | null; setFocus: (id: string | null) => void; onOpen: (id: string, p: Panel) => void }) {
   const [open, setOpen] = useState(false);
   if (!tasks.length) return null;
   return (
     <section>
-      <button onClick={() => setOpen((v) => !v)} aria-expanded={open} className="flex items-center gap-2 text-[14px] font-semibold text-ink-2 hover:text-ink">
-        <CaretDown size={14} weight="bold" className={cx("transition-transform", !open && "-rotate-90")} />
-        {title}
-        <span className="font-normal tabular-nums text-muted">{tasks.length}</span>
+      <button onClick={() => setOpen((v) => !v)} aria-expanded={open} className="flex items-center gap-1.5 px-3.5 text-[12.5px] font-medium text-muted hover:text-ink">
+        <CaretDown size={12} weight="bold" className={cx("transition-transform duration-150", !open && "-rotate-90")} />
+        {title} <span className="tabular-nums opacity-70">{tasks.length}</span>
       </button>
       {open ? (
-        <ul className="mt-3 space-y-3">
+        <ul className="mt-1 space-y-0.5">
           {tasks.map((t) => (
-            <TaskCard key={t.id} task={t} onOpen={(p) => onOpen(t.id, p)} />
+            <Item key={t.id} task={t} expanded={focusId === t.id} onToggle={() => setFocus(focusId === t.id ? null : t.id)} onOpen={(p) => onOpen(t.id, p)} />
           ))}
         </ul>
       ) : null}

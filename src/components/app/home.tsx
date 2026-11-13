@@ -1,26 +1,34 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowUp,
-  CalendarDots,
-  ChatCircleDots,
+  BellSimple,
+  CalendarPlus,
+  CaretDown,
+  ChatCircle,
   Check,
+  CheckCircle,
   EnvelopeSimple,
-  EnvelopeSimpleOpen,
-  Lightning,
+  ListChecks,
+  MinusCircle,
+  PaperPlaneTilt,
   Paperclip,
   PencilSimpleLine,
-  Plugs,
-  Tray,
+  PlusCircle,
+  Sparkle,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import type { Task, Toolkit } from "@/lib/types";
+import type { Task } from "@/lib/types";
 import { Button, cx, Spinner } from "../ui";
-import { dayDiff, isOverdue, timeAgo } from "./dates";
-import { useStore } from "./store";
+import { api } from "./api";
+import { Avatar, CalendarLogo, GmailLogo, senderName } from "./bits";
+import { timeAgo } from "./dates";
+import { reportError, useStore } from "./store";
+import { DueChip } from "./task-bits";
+import { TaskMenu, useTaskCommands, type Panel } from "./task-card";
 import { useWork, type WorkLine } from "./work";
 
 const EXAMPLE = `From: Riverside Dental <frontdesk@riversidedental.com>
@@ -33,44 +41,11 @@ Please confirm your appointment for Thursday by 3 p.m. and complete the intake f
 Thanks,
 Riverside Dental front desk`;
 
-/* ------------------------------ Briefing ------------------------------ */
-
-export function Briefing({ tasks, greeting, handle }: { tasks: Task[]; greeting: string; handle: string | null }) {
-  const now = new Date();
-  const live = tasks.filter((t) => !t.isPromotional && !(t.snoozedUntil && new Date(t.snoozedUntil) > now));
-  const needs = live.filter((t) => t.status === "detected" || t.dueStatus === "needs_review" || t.duplicateOf).length;
-  const overdue = live.filter((t) => t.dueAt && t.dueStatus !== "unclear" && isOverdue(t.dueAt, t.dueAllDay, now)).length;
-  const week = live.filter((t) => t.dueAt && t.dueStatus !== "unclear" && dayDiff(t.dueAt, now) >= 0 && dayDiff(t.dueAt, now) <= 7).length;
-  const drafts = live.filter((t) => t.actions.some((a) => a.kind === "reply" && a.status === "prepared")).length;
-  const stats: [string, number, string?][] = [
-    ["Need a look", needs, needs ? "text-warn" : undefined],
-    ["Overdue", overdue, overdue ? "text-danger" : undefined],
-    ["Due this week", week],
-    ["Drafts ready", drafts, drafts ? "text-accent-text" : undefined],
-  ];
-  return (
-    <header>
-      <h1 className="text-[26px] font-[560] leading-tight tracking-[-0.03em]">
-        {greeting}
-        {handle ? <span className="text-muted">, {handle}</span> : null}
-      </h1>
-      <dl className="mt-5 grid grid-cols-2 overflow-hidden rounded-xl border border-line bg-surface sm:grid-cols-4">
-        {stats.map(([label, n, tone], i) => (
-          <div key={label} className={cx("px-4 py-3.5", i > 0 && "sm:border-l sm:border-line", i >= 2 && "border-t border-line sm:border-t-0", i === 1 && "border-l border-line")}>
-            <dt className="text-[12.5px] text-muted">{label}</dt>
-            <dd className={cx("mt-0.5 text-[26px] font-[520] leading-none tracking-[-0.03em] tabular-nums", tone ?? (n ? "text-ink" : "text-muted"))}>{n}</dd>
-          </div>
-        ))}
-      </dl>
-    </header>
-  );
-}
-
 /* ------------------------------ Composer ------------------------------ */
 
 type Mode = "add" | "ask";
 
-export function Composer() {
+export function Composer({ hasTasks }: { hasTasks: boolean }) {
   const w = useWork();
   const [mode, setMode] = useState<Mode>("add");
   const [text, setText] = useState("");
@@ -83,7 +58,7 @@ export function Composer() {
     const el = ta.current;
     if (!el) return;
     el.style.height = "0px";
-    el.style.height = Math.min(220, Math.max(52, el.scrollHeight)) + "px";
+    el.style.height = Math.min(240, Math.max(64, el.scrollHeight)) + "px";
   }, [text]);
 
   const attach = (f: File) => {
@@ -103,241 +78,289 @@ export function Composer() {
   };
 
   return (
-    <div
-      onDragOver={(e) => {
-        e.preventDefault();
-        setDrag(true);
-      }}
-      onDragLeave={() => setDrag(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setDrag(false);
-        const f = e.dataTransfer.files?.[0];
-        if (f) attach(f);
-      }}
-      className={cx(
-        "rounded-xl border bg-surface shadow-card transition-[border-color,box-shadow] duration-150 focus-within:border-accent-text/60",
-        drag ? "border-accent-text ring-4 ring-accent-soft" : "border-line-strong",
-      )}
-    >
-      <label htmlFor="composer" className="sr-only">
-        {mode === "ask" ? "Ask about your list" : "Paste a message, email or note"}
-      </label>
-      <textarea
-        id="composer"
-        ref={ta}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onPaste={(e) => {
-          const f = Array.from(e.clipboardData.files)[0];
-          if (f) {
-            e.preventDefault();
-            attach(f);
-          }
+    <div>
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDrag(true);
         }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && (mode === "ask" || e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            send();
-          }
+        onDragLeave={() => setDrag(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDrag(false);
+          const f = e.dataTransfer.files?.[0];
+          if (f) attach(f);
         }}
-        placeholder={mode === "ask" ? "What's due this week? What should I do first?" : "Paste an email, a text, anything with something to do in it…"}
-        className="block w-full resize-none bg-transparent px-4 pt-3.5 text-[15px] leading-relaxed text-ink outline-none placeholder:text-muted"
-      />
-      {file ? (
-        <div className="mx-3 mb-2 inline-flex items-center gap-2 rounded-lg bg-surface-2 py-1.5 pr-1.5 pl-3 text-[13px]">
-          <Paperclip size={14} className="text-accent-text" />
-          <span className="max-w-[28ch] truncate">{file.name}</span>
-          <button aria-label="Remove file" onClick={() => setFile(null)} className="inline-flex size-6 items-center justify-center rounded-md text-muted hover:bg-surface hover:text-ink">
-            <X size={13} />
+        className={cx(
+          "relative z-10 rounded-[18px] border bg-surface shadow-float transition-[border-color,box-shadow] duration-150",
+          drag ? "border-accent-text ring-4 ring-accent-soft" : "border-line-strong focus-within:border-ink/35",
+        )}
+      >
+        <label htmlFor="composer" className="sr-only">
+          {mode === "ask" ? "Ask about your list" : "Paste a message, email or note"}
+        </label>
+        <textarea
+          id="composer"
+          ref={ta}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onPaste={(e) => {
+            const f = Array.from(e.clipboardData.files)[0];
+            if (f) {
+              e.preventDefault();
+              attach(f);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && (mode === "ask" || e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              send();
+            }
+          }}
+          placeholder={mode === "ask" ? "Ask about your list. What's due this week?" : "Paste an email, a text, or a note. I'll pull out what you need to do."}
+          className="block w-full resize-none bg-transparent px-5 pt-4 text-[15.5px] leading-relaxed text-ink outline-none focus-visible:outline-none placeholder:text-muted"
+        />
+        {file ? (
+          <div className="mx-4 mb-2 inline-flex items-center gap-2 rounded-lg bg-surface-2 py-1.5 pr-1.5 pl-3 text-[13px]">
+            <Paperclip size={14} />
+            <span className="max-w-[28ch] truncate">{file.name}</span>
+            <button aria-label="Remove file" onClick={() => setFile(null)} className="inline-flex size-6 items-center justify-center rounded-md text-muted hover:bg-surface hover:text-ink">
+              <X size={13} />
+            </button>
+          </div>
+        ) : null}
+        <div className="flex items-center gap-1.5 px-3 pb-3">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,application/pdf"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) attach(f);
+              e.target.value = "";
+            }}
+          />
+          <button onClick={() => fileRef.current?.click()} aria-label="Attach a screenshot or PDF" title="Attach a screenshot or PDF" className="inline-flex size-8 items-center justify-center rounded-full border border-line-strong text-ink-2 transition-colors duration-150 hover:bg-surface-2 hover:text-ink">
+            <Paperclip size={15} />
+          </button>
+          <div role="tablist" aria-label="What to do with this" className="inline-flex rounded-full border border-line-strong p-0.5">
+            {(
+              [
+                ["add", "Find to-dos", ListChecks],
+                ["ask", "Ask", ChatCircle],
+              ] as const
+            ).map(([m, label, Icon]) => (
+              <button
+                key={m}
+                role="tab"
+                aria-selected={mode === m}
+                onClick={() => {
+                  setMode(m);
+                  ta.current?.focus();
+                }}
+                className={cx(
+                  "inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors duration-150",
+                  mode === m ? "bg-ink text-accent-ink" : "text-ink-2 hover:text-ink",
+                )}
+              >
+                <Icon size={14} />
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="ml-auto hidden text-[12px] text-muted sm:inline">{mode === "ask" ? "Enter" : "⌘ Enter"}</span>
+          <button
+            onClick={send}
+            disabled={!canSend}
+            aria-label={mode === "ask" ? "Ask" : "Find to-dos"}
+            className="inline-flex size-9 items-center justify-center rounded-full bg-accent text-accent-ink transition-[background-color,transform,opacity] duration-150 hover:bg-accent-hover active:scale-[0.96] disabled:opacity-25"
+          >
+            {w.running ? <Spinner /> : <ArrowUp size={17} weight="bold" />}
           </button>
         </div>
-      ) : null}
-      <div className="flex items-center gap-1.5 px-2.5 pb-2.5">
-        <div role="tablist" aria-label="What to do with this" className="inline-flex rounded-lg bg-surface-2 p-0.5">
-          {(
-            [
-              ["add", "Find tasks", Tray],
-              ["ask", "Ask", ChatCircleDots],
-            ] as const
-          ).map(([m, label, Icon]) => (
-            <button
-              key={m}
-              role="tab"
-              aria-selected={mode === m}
-              onClick={() => setMode(m)}
-              className={cx(
-                "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium transition-colors duration-150",
-                mode === m ? "bg-surface text-ink shadow-card" : "text-muted hover:text-ink",
-              )}
-            >
-              <Icon size={14} />
-              {label}
-            </button>
-          ))}
-        </div>
-        {mode === "add" ? (
-          <>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/png,image/jpeg,image/webp,application/pdf"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) attach(f);
-                e.target.value = "";
-              }}
-            />
-            <button onClick={() => fileRef.current?.click()} className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12.5px] text-muted hover:bg-surface-2 hover:text-ink">
-              <Paperclip size={14} />
-              <span className="hidden sm:inline">Screenshot or PDF</span>
-            </button>
-          </>
-        ) : null}
-        <span className="ml-auto hidden text-[11.5px] text-muted sm:inline">{mode === "ask" ? "Enter" : "⌘ Enter"}</span>
-        <button
-          onClick={send}
-          disabled={!canSend}
-          aria-label={mode === "ask" ? "Ask" : "Find tasks"}
-          className="inline-flex size-8 items-center justify-center rounded-lg bg-accent text-accent-ink transition-[background-color,transform,opacity] duration-150 hover:bg-accent-hover active:scale-[0.96] disabled:opacity-35"
-        >
-          {w.running ? <Spinner /> : <ArrowUp size={16} weight="bold" />}
-        </button>
       </div>
+      <ConnectStrip />
+      <Chips hasTasks={hasTasks} />
     </div>
   );
 }
 
-/* ------------------------------ Starters ------------------------------ */
+/** Tucked under the composer: the one account that makes this useful, and its state. */
+function ConnectStrip() {
+  const w = useWork();
+  const c = w.connections;
+  if (!c) return <div className="mx-3 h-11 rounded-b-2xl border border-t-0 border-line bg-surface-2/60" aria-hidden />;
+  const gmail = c.gmail.connected;
+  let text: ReactNode;
+  let action: ReactNode = null;
+  if (gmail) {
+    text = (
+      <>
+        <span className="font-medium text-ink">Gmail is connected.</span> {c.gmail.lastScanAt ? `Last checked ${timeAgo(c.gmail.lastScanAt)}.` : "Not checked yet."}
+      </>
+    );
+    action = (
+      <Button size="sm" variant="primary" onClick={() => void w.scanInbox()} disabled={!!w.running} className="rounded-full">
+        Check my inbox
+      </Button>
+    );
+  } else if (w.linking === "gmail") {
+    text = "Approve Gmail in the tab that just opened. This updates on its own.";
+    action = <Spinner className="mr-2 text-muted" />;
+  } else if (!c.available) {
+    text = c.message ?? "Gmail can't be connected right now. You can still paste messages above.";
+  } else {
+    text = (
+      <>
+        <span className="font-medium text-ink">Connect Gmail</span> and I&apos;ll read your inbox for you.
+      </>
+    );
+    action = (
+      <Button size="sm" variant="primary" onClick={() => void w.connect("gmail")} disabled={!!w.linking} className="rounded-full">
+        Connect Gmail
+      </Button>
+    );
+  }
+  return (
+    <div className="mx-3 flex min-h-11 items-center gap-2.5 rounded-b-2xl border border-t-0 border-line bg-surface-2/60 py-1.5 pr-1.5 pl-4 text-[13px] text-ink-2">
+      <span className="flex items-center gap-1.5">
+        <GmailLogo size={15} />
+        <CalendarLogo size={14} />
+      </span>
+      <span className="min-w-0 flex-1 leading-snug">{text}</span>
+      {action}
+    </div>
+  );
+}
 
-export function Starters({ onExample }: { onExample?: () => void }) {
+function Chips({ hasTasks }: { hasTasks: boolean }) {
   const w = useWork();
   const { open } = useStore();
-  const gmail = w.connections?.gmail.connected;
   const waiting = (open ?? []).filter((t) => t.nextStepType === "reply" && !t.isPromotional && !t.actions.some((a) => a.kind === "reply")).length;
-  const items = [
-    {
-      lead: true,
-      icon: EnvelopeSimpleOpen,
-      title: gmail ? "Check my inbox" : "Connect Gmail",
-      body: gmail ? "Read this week's mail and pull out what needs you." : "Let LooseEnds read your inbox and find what needs you.",
-      run: () => (gmail ? w.scanInbox() : w.connect("gmail")),
-      off: !!w.running || !!w.linking || (!gmail && w.connections?.available === false),
-    },
-    { icon: PencilSimpleLine, title: "Draft my replies", body: waiting ? `${waiting} waiting for a draft.` : "Write replies for you to review.", run: () => w.draftReplies(), off: !!w.running },
-    { icon: CalendarDots, title: "What's due this week?", body: "A quick answer from your list.", run: () => w.ask("What's due this week, and what should I do first?"), off: !!w.running },
-    { icon: Lightning, title: "Try an example", body: "See it work on a sample email.", run: () => (onExample ? onExample() : w.capture({ text: EXAMPLE, label: "Try the dentist example" })), off: !!w.running },
-  ];
+  const chips: { icon: ReactNode; label: string; run: () => void }[] = [];
+  if (waiting) chips.push({ icon: <PencilSimpleLine size={14} />, label: waiting === 1 ? "Draft my reply" : `Draft my ${waiting} replies`, run: () => void w.draftReplies() });
+  if (hasTasks) {
+    chips.push({ icon: <Sparkle size={14} />, label: "What should I do first?", run: () => void w.ask("What should I do first, and why?") });
+    chips.push({ icon: <CalendarPlus size={14} />, label: "What's due this week?", run: () => void w.ask("What's due this week?") });
+  } else chips.push({ icon: <Sparkle size={14} />, label: "Try a sample email", run: () => void w.capture({ text: EXAMPLE, label: "Try a sample email" }) });
   return (
-    <div className="grid grid-cols-2 gap-2 lg:grid-cols-[1.35fr_1fr_1fr_1fr]">
-      {items.map((it) => (
+    <div className="mt-4 flex flex-wrap justify-center gap-2">
+      {chips.map((c) => (
         <button
-          key={it.title}
-          onClick={() => void it.run()}
-          disabled={it.off}
-          className={cx(
-            "group flex min-h-[92px] flex-col items-start rounded-xl border p-3.5 text-left transition-[border-color,background-color,transform] duration-150 active:scale-[0.985] disabled:opacity-50",
-            it.lead ? "col-span-2 border-accent-text/30 bg-accent-soft hover:border-accent-text/60 lg:col-span-1" : "border-line bg-surface hover:border-line-strong",
-          )}
+          key={c.label}
+          onClick={c.run}
+          disabled={!!w.running}
+          className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line-strong bg-surface px-3.5 text-[13px] font-medium text-ink-2 transition-[background-color,color,transform] duration-150 hover:bg-surface-2 hover:text-ink active:scale-[0.98] disabled:opacity-50"
         >
-          <it.icon size={18} className={it.lead ? "text-accent-text" : "text-muted group-hover:text-ink"} />
-          <span className="mt-auto pt-3 text-[13.5px] font-[560] text-ink">{it.title}</span>
-          <span className="text-[12.5px] leading-snug text-muted">{it.body}</span>
+          {c.icon}
+          {c.label}
         </button>
       ))}
     </div>
   );
 }
 
-/* ------------------------------ Work stream (the signature) ------------------------------ */
+/* ------------------------------ Live: what LooseEnds is doing ------------------------------ */
 
-const GLYPH: Record<WorkLine["kind"], string> = { you: "›", step: "·", found: "+", skip: "−", done: "✓", error: "!", answer: "" };
-
-export function WorkStream({ onOpenTask }: { onOpenTask: (id: string) => void }) {
+export function Live({ onOpenTask }: { onOpenTask: (id: string) => void }) {
   const { lines, running, clear } = useWork();
   const reduce = useReducedMotion();
-  const end = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLOListElement>(null);
   useEffect(() => {
-    end.current?.scrollIntoView({ block: "nearest", behavior: reduce ? "auto" : "smooth" });
+    const el = box.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: reduce ? "auto" : "smooth" });
   }, [lines.length, reduce]);
 
+
   if (!lines.length && !running) return null;
+  const lastYou = lines.map((l) => l.kind).lastIndexOf("you");
+  const current = lines.slice(Math.max(0, lastYou));
+  const scan = current[0]?.text === "Check my inbox";
+  const read = scan ? current.filter((l) => l.kind === "found" || l.kind === "skip").length : 0;
+  const found = current.filter((l) => l.kind === "found").length;
+
   return (
-    <section aria-label="What LooseEnds is doing" aria-live="polite" className="overflow-hidden rounded-xl border border-line bg-surface">
-      <div className="flex h-9 items-center gap-2 border-b border-line px-3.5">
-        <span className={cx("size-1.5 rounded-full", running ? "animate-pulse bg-accent-text" : "bg-muted/50")} aria-hidden />
-        <span className="font-mono text-[11.5px] text-ink-2">{running ?? "Finished"}</span>
+    <section aria-label="What LooseEnds is doing" aria-live="polite" className="overflow-hidden rounded-[14px] border border-line bg-surface shadow-card">
+      <div className="flex h-11 items-center gap-2.5 px-4">
+        {running ? <Spinner className="text-accent-text" /> : <CheckCircle size={17} weight="fill" className="text-ok" />}
+        <span className="text-[14px] font-[560]">{running ?? "Done"}</span>
+        {read ? (
+          <span className="text-[13px] tabular-nums text-muted">
+            {read} read · {found} with something to do
+          </span>
+        ) : null}
         {!running ? (
-          <button onClick={clear} className="ml-auto text-[12px] text-muted hover:text-ink">
-            Clear
+          <button onClick={clear} className="ml-auto rounded-md px-1.5 py-0.5 text-[12.5px] text-muted hover:bg-surface-2 hover:text-ink">
+            Hide
           </button>
         ) : null}
       </div>
-      <div className={cx("h-px", running && "sweep")} aria-hidden />
-      <ol className="max-h-[300px] space-y-0.5 overflow-y-auto px-3.5 py-3 font-mono text-[12.5px] leading-relaxed">
+      <div className={cx("h-0.5 bg-line", running && "sweep")} aria-hidden />
+      <ol ref={box} className="max-h-[300px] space-y-2.5 overflow-y-auto px-4 py-3.5">
         <AnimatePresence initial={false}>
-          {lines.map((l, i) => {
-            const last = i === lines.length - 1;
-            if (l.kind === "answer")
-              return (
-                <motion.li key={l.id} initial={reduce ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }} className="my-2 list-none rounded-lg bg-surface-2 px-3.5 py-3 font-sans text-[14.5px] leading-relaxed text-ink">
-                  {l.text}
-                  {l.taskIds?.length ? (
-                    <span className="mt-2 flex flex-wrap gap-1.5">
-                      {l.taskIds.map((id) => (
-                        <TaskRef key={id} id={id} onOpen={onOpenTask} />
-                      ))}
-                    </span>
-                  ) : null}
-                </motion.li>
-              );
-            return (
-              <motion.li
-                key={l.id}
-                initial={reduce ? false : { opacity: 0, x: -6 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-                className={cx("flex list-none gap-2.5", l.kind === "you" && "mt-2 first:mt-0")}
-              >
-                <span
-                  aria-hidden
-                  className={cx(
-                    "w-3 shrink-0 text-center",
-                    l.kind === "found" || l.kind === "done" ? "text-accent-text" : l.kind === "error" ? "text-danger" : "text-muted",
-                  )}
-                >
-                  {GLYPH[l.kind]}
-                </span>
-                <span className="min-w-0 flex-1">
-                  {l.kind === "found" && l.taskIds?.length === 1 ? (
-                    <button onClick={() => onOpenTask(l.taskIds![0])} className="text-left text-ink underline decoration-line-strong underline-offset-[3px] hover:decoration-accent-text">
-                      {l.text}
-                    </button>
-                  ) : (
-                    <span
-                      className={cx(
-                        l.kind === "you" ? "text-ink" : l.kind === "skip" ? "text-muted" : l.kind === "error" ? "text-danger" : l.kind === "step" ? "text-ink-2" : "text-ink",
-                        last && running && l.kind === "step" && "caret",
-                      )}
-                    >
-                      {l.text}
-                    </span>
-                  )}
-                  {l.sub ? <span className="block truncate text-[11.5px] text-muted">{l.sub}</span> : null}
-                  {l.topUpUrl ? (
-                    <a href={l.topUpUrl} target="_blank" rel="noopener" className="mt-1 inline-block font-sans text-[13px] font-medium text-accent-text underline underline-offset-2">
-                      Add credit
-                    </a>
-                  ) : null}
-                </span>
-              </motion.li>
-            );
-          })}
+          {current.map((l) => (
+            <motion.li key={l.id} initial={reduce ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }} className="list-none">
+              <Line l={l} onOpenTask={onOpenTask} />
+            </motion.li>
+          ))}
         </AnimatePresence>
-        <div ref={end} />
       </ol>
     </section>
+  );
+}
+
+function Line({ l, onOpenTask }: { l: WorkLine; onOpenTask: (id: string) => void }) {
+  if (l.kind === "you")
+    return (
+      <div className="flex justify-end">
+        <span className="max-w-[85%] truncate rounded-2xl rounded-br-md bg-surface-2 px-3.5 py-1.5 text-[14px] text-ink">{l.text}</span>
+      </div>
+    );
+  if (l.kind === "answer")
+    return (
+      <div className="text-[15px] leading-relaxed text-ink">
+        {l.text}
+        {l.taskIds?.length ? (
+          <span className="mt-2 flex flex-wrap gap-1.5">
+            {l.taskIds.map((id) => (
+              <TaskRef key={id} id={id} onOpen={onOpenTask} />
+            ))}
+          </span>
+        ) : null}
+      </div>
+    );
+  const icon =
+    l.kind === "found" ? (
+      <PlusCircle size={17} weight="fill" className="text-ok" />
+    ) : l.kind === "skip" ? (
+      <MinusCircle size={17} className="text-muted/70" />
+    ) : l.kind === "done" ? (
+      <CheckCircle size={17} weight="fill" className="text-ok" />
+    ) : l.kind === "error" ? (
+      <WarningCircle size={17} weight="fill" className="text-danger" />
+    ) : (
+      <span className="mx-[6px] mt-[7px] block size-[5px] rounded-full bg-muted/60" />
+    );
+  return (
+    <div className="flex items-start gap-2.5 text-[14px] leading-snug">
+      <span className="mt-px shrink-0">{icon}</span>
+      <span className="min-w-0 flex-1">
+        {l.kind === "found" && l.taskIds?.length === 1 ? (
+          <button onClick={() => onOpenTask(l.taskIds![0])} className="text-left font-medium text-ink hover:underline hover:underline-offset-[3px]">
+            {l.text}
+          </button>
+        ) : (
+          <span className={cx(l.kind === "skip" || l.kind === "step" ? "text-ink-2" : l.kind === "error" ? "text-danger" : "font-medium text-ink")}>{l.text}</span>
+        )}
+        {l.sub ? <span className="block truncate text-[12.5px] text-muted">{l.sub}</span> : null}
+        {l.topUpUrl ? (
+          <a href={l.topUpUrl} target="_blank" rel="noopener" className="mt-1 inline-block text-[13px] font-medium text-accent-text underline underline-offset-2">
+            Add credit
+          </a>
+        ) : null}
+      </span>
+    </div>
   );
 }
 
@@ -346,151 +369,168 @@ function TaskRef({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
   const t = open?.find((x) => x.id === id);
   if (!t) return null;
   return (
-    <button onClick={() => onOpen(id)} className="inline-flex h-7 items-center rounded-md border border-line-strong bg-surface px-2 text-[12.5px] font-medium text-ink hover:border-accent-text/60">
+    <button onClick={() => onOpen(id)} className="inline-flex h-7 items-center rounded-full border border-line-strong bg-surface px-3 text-[12.5px] font-medium text-ink hover:bg-surface-2">
       {t.title}
     </button>
   );
 }
 
-/* ------------------------------ Right rail ------------------------------ */
+/* ------------------------------ The list: one open at a time ------------------------------ */
 
-function ConnectionRow({ toolkit, name, icon: Icon, hint }: { toolkit: Toolkit; name: string; icon: typeof EnvelopeSimple; hint: string }) {
+export function Item({ task, expanded, onToggle, onOpen }: { task: Task; expanded: boolean; onToggle: () => void; onOpen: (p: Panel) => void }) {
+  const reduce = useReducedMotion();
+  const cmd = useTaskCommands();
+  const { upsert } = useStore();
   const w = useWork();
-  const c = w.connections;
-  const connected = !!c?.[toolkit].connected;
-  const busy = w.linking === toolkit;
-  return (
-    <li className="flex items-center gap-3 py-2.5">
-      <span className={cx("inline-flex size-8 shrink-0 items-center justify-center rounded-lg", connected ? "bg-accent-soft text-accent-text" : "bg-surface-2 text-muted")}>
-        <Icon size={16} weight={connected ? "fill" : "regular"} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-[13.5px] font-medium">{name}</span>
-        <span className="block truncate text-[12px] text-muted">
-          {connected ? (toolkit === "gmail" ? (c?.gmail.lastScanAt ? `Checked ${timeAgo(c.gmail.lastScanAt)}` : "Connected. Not checked yet.") : "Connected") : hint}
-        </span>
-      </span>
-      {connected ? (
-        toolkit === "gmail" ? (
-          <Button size="sm" variant="secondary" onClick={() => void w.scanInbox()} disabled={!!w.running}>
-            Check
-          </Button>
-        ) : (
-          <Check size={16} weight="bold" className="mr-1 text-accent-text" aria-label="Connected" />
-        )
-      ) : (
-        <Button size="sm" variant="secondary" onClick={() => void w.connect(toolkit)} loading={busy} disabled={!c || c.available === false || !!w.linking}>
-          Connect
-        </Button>
-      )}
-    </li>
-  );
-}
+  const [drafting, setDrafting] = useState(false);
+  const who = senderName(task.source?.from) ?? (task.source ? task.source.title : "Added by you");
+  const reply = task.actions.find((a) => a.kind === "reply");
+  const draftBody = reply?.kind === "reply" ? reply.payload.body : null;
+  const sent = !!reply?.receipts.some((r) => r.what === "Sent with Gmail");
+  const hasEvent = task.actions.some((a) => a.kind === "event");
+  const dupTitle = cmd.duplicateTitle(task);
+  const isNew = task.status === "detected";
 
-function RailCard({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <section className="rounded-xl border border-line bg-surface">
-      <div className="flex h-10 items-center justify-between border-b border-line px-4">
-        <h2 className="text-[12.5px] font-[560] text-ink-2">{title}</h2>
-        {right}
-      </div>
-      <div className="px-4 py-1.5">{children}</div>
-    </section>
-  );
-}
-
-export function Rail({ tasks, history, onOpenTask }: { tasks: Task[]; history: Task[] | null; onOpenTask: (id: string) => void }) {
-  const w = useWork();
-  const now = useMemo(() => new Date(), []);
-
-  const days = useMemo(() => {
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(now);
-      d.setDate(now.getDate() + i);
-      const due = tasks.filter((t) => !t.isPromotional && t.dueAt && t.dueStatus !== "unclear" && dayDiff(t.dueAt, now) === i);
-      return { d, due };
-    });
-  }, [tasks, now]);
-  const [day, setDay] = useState(0);
-
-  const activity = useMemo(() => {
-    const items: { at: string; text: string; id: string; icon: typeof Check }[] = [];
-    for (const t of [...tasks, ...(history ?? [])]) {
-      if (t.status === "completed" && t.completedAt) items.push({ at: t.completedAt, text: `Done: ${t.title}`, id: t.id, icon: Check });
-      for (const a of t.actions) for (const r of a.receipts) items.push({ at: r.at, text: `${r.what}: ${t.title}`, id: t.id, icon: a.kind === "event" ? CalendarDots : EnvelopeSimple });
-      items.push({ at: t.createdAt, text: `Found: ${t.title}`, id: t.id, icon: Tray });
+  const draft = async () => {
+    setDrafting(true);
+    try {
+      const r = await api<{ task: Task }>(`/api/tasks/${task.id}/draft`, { method: "POST", json: {} });
+      upsert(r.task);
+    } catch (e) {
+      reportError(e, "Couldn't write that draft.");
+    } finally {
+      setDrafting(false);
     }
-    const seen = new Set<string>();
-    return items
-      .sort((a, b) => +new Date(b.at) - +new Date(a.at))
-      .filter((x) => (seen.has(x.at + x.text) ? false : (seen.add(x.at + x.text), true)))
-      .slice(0, 7);
-  }, [tasks, history]);
+  };
+
+  let primary: ReactNode;
+  if (sent)
+    primary = (
+      <Button variant="primary" onClick={() => void cmd.complete(task)}>
+        <Check size={16} weight="bold" /> Mark done
+      </Button>
+    );
+  else if (task.nextStepType === "reply")
+    primary = draftBody ? (
+      <Button variant="primary" onClick={() => onOpen("reply")}>
+        <PaperPlaneTilt size={16} weight="fill" /> {w.connections?.gmail.connected ? "Review and send" : "Review reply"}
+      </Button>
+    ) : (
+      <Button variant="primary" onClick={() => void draft()} loading={drafting}>
+        {drafting ? "Writing…" : (<><PencilSimpleLine size={16} /> Draft a reply</>)}
+      </Button>
+    );
+  else if (task.nextStepType === "event")
+    primary = (
+      <Button variant="primary" onClick={() => onOpen("event")}>
+        <CalendarPlus size={16} /> {hasEvent ? "Open event" : "Add to calendar"}
+      </Button>
+    );
+  else
+    primary = (
+      <Button variant="primary" onClick={() => onOpen("reminder")}>
+        <BellSimple size={16} /> Remind me
+      </Button>
+    );
 
   return (
-    <aside className="space-y-3">
-      <RailCard title="Connections" right={<Plugs size={14} className="text-muted" />}>
-        <ul className="divide-y divide-line">
-          <ConnectionRow toolkit="gmail" name="Gmail" icon={EnvelopeSimple} hint="Find tasks in your inbox" />
-          <ConnectionRow toolkit="googlecalendar" name="Google Calendar" icon={CalendarDots} hint="Add events in one tap" />
-        </ul>
-        {w.connections && !w.connections.available ? (
-          <p className="flex items-start gap-1.5 border-t border-line py-2.5 text-[12px] leading-snug text-muted">
-            <WarningCircle size={14} className="mt-px shrink-0 text-warn" />
-            {w.connections.message ?? "Connections aren't available right now."}
-          </p>
-        ) : null}
-      </RailCard>
+    <motion.li
+      id={`t-${task.id}`}
+      layout={reduce ? false : "position"}
+      initial={reduce ? false : { opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={reduce ? { opacity: 0 } : { opacity: 0, x: 20, transition: { duration: 0.18 } }}
+      transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+      className={cx("list-none rounded-[14px] border transition-[background-color,border-color,box-shadow] duration-150", expanded ? "border-line-strong bg-surface shadow-card" : "border-transparent hover:bg-ink/[0.035]")}
+    >
+      <div className="flex items-center gap-3 px-3.5 py-3">
+        <button
+          onClick={() => void cmd.complete(task)}
+          aria-label={`Mark "${task.title}" done`}
+          className="inline-flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] border-line-strong text-transparent transition-colors duration-150 hover:border-ok hover:bg-ok-soft hover:text-ok active:scale-90"
+        >
+          <Check size={12} weight="bold" />
+        </button>
+        <button onClick={onToggle} aria-expanded={expanded} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+          <Avatar name={who} size={30} />
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-2">
+              <span className={cx("truncate text-[15px] tracking-[-0.005em] text-ink", expanded ? "font-semibold" : "font-[560]")}>{task.title}</span>
+              {isNew ? <span className="size-1.5 shrink-0 rounded-full bg-accent-text" title="New" aria-label="New" /> : null}
+            </span>
+            <span className="block truncate text-[13px] text-muted">
+              {who}
+              {!expanded && draftBody ? (sent ? " · Reply sent" : " · Draft ready") : ""}
+            </span>
+          </span>
+          <DueChip task={task} />
+          <CaretDown size={14} className={cx("shrink-0 text-muted transition-transform duration-150", expanded && "rotate-180")} />
+        </button>
+      </div>
 
-      <RailCard title="This week">
-        <div className="grid grid-cols-7 gap-1 py-2">
-          {days.map(({ d, due }, i) => (
-            <button
-              key={i}
-              onClick={() => setDay(i)}
-              aria-pressed={day === i}
-              className={cx("flex flex-col items-center rounded-lg py-1.5 transition-colors duration-150", day === i ? "bg-surface-2" : "hover:bg-surface-2/60")}
-            >
-              <span className="text-[10.5px] text-muted">{d.toLocaleDateString(undefined, { weekday: "narrow" })}</span>
-              <span className={cx("text-[13.5px] font-medium tabular-nums", i === 0 && "text-accent-text")}>{d.getDate()}</span>
-              <span className={cx("mt-1 h-1 rounded-full", due.length ? "w-3 bg-accent-text" : "w-1 bg-line-strong")} aria-hidden />
+      {expanded ? (
+        <div className="pr-4 pb-4 pl-[50px] sm:pl-[92px]">
+          <p className="text-[14.5px] leading-relaxed text-ink-2">{task.nextStep}</p>
+
+          {task.evidence?.quote ? (
+            <button onClick={() => onOpen("source")} title="Open the original message" className="mt-3 block w-full border-l-2 border-line-strong py-0.5 pl-3 text-left text-[13.5px] leading-relaxed text-muted transition-colors duration-150 hover:border-ink/40 hover:text-ink-2">
+              <span className="line-clamp-3">“{task.evidence.quote}”</span>
             </button>
-          ))}
-        </div>
-        <ul className="border-t border-line py-2 text-[13px]">
-          {days[day].due.length ? (
-            days[day].due.map((t) => (
-              <li key={t.id}>
-                <button onClick={() => onOpenTask(t.id)} className="flex w-full items-center gap-2 rounded-md py-1 text-left hover:text-accent-text">
-                  <span className="size-1 shrink-0 rounded-full bg-accent-text" aria-hidden />
-                  <span className="truncate">{t.title}</span>
-                  {!t.dueAllDay && t.dueAt ? <span className="ml-auto shrink-0 text-[12px] tabular-nums text-muted">{new Date(t.dueAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span> : null}
-                </button>
-              </li>
-            ))
-          ) : (
-            <li className="py-1 text-muted">Nothing due {day === 0 ? "today" : days[day].d.toLocaleDateString(undefined, { weekday: "long" })}.</li>
-          )}
-        </ul>
-      </RailCard>
+          ) : null}
 
-      <RailCard title="Activity">
-        {activity.length ? (
-          <ol className="py-1.5">
-            {activity.map((a, i) => (
-              <li key={i}>
-                <button onClick={() => onOpenTask(a.id)} className="flex w-full items-start gap-2.5 py-1.5 text-left text-[13px] hover:text-accent-text">
-                  <a.icon size={14} className="mt-0.5 shrink-0 text-muted" />
-                  <span className="min-w-0 flex-1 truncate">{a.text}</span>
-                  <span className="shrink-0 font-mono text-[11px] text-muted">{timeAgo(a.at)}</span>
+          {task.dueStatus === "needs_review" || task.dueStatus === "unclear" ? (
+            <p className="mt-3 flex items-start gap-1.5 text-[13px] text-warn">
+              <WarningCircle size={15} className="mt-px shrink-0" />
+              <span>
+                {task.dueNote ?? "Check the date on this one."}{" "}
+                <button onClick={() => onOpen("details")} className="font-medium underline underline-offset-2">
+                  Set the date
                 </button>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="py-3 text-[13px] text-muted">What LooseEnds finds and what you finish shows up here.</p>
-        )}
-      </RailCard>
-    </aside>
+              </span>
+            </p>
+          ) : null}
+
+          {dupTitle ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 text-[13px] text-ink-2">
+              <span className="min-w-0 flex-1">
+                Looks like <span className="font-medium text-ink">{dupTitle}</span>, already on your list.
+              </span>
+              <Button size="sm" variant="secondary" onClick={() => void cmd.merge(task)}>
+                Merge
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => void cmd.keepBoth(task)}>
+                Keep both
+              </Button>
+            </div>
+          ) : null}
+
+          {draftBody ? (
+            <button onClick={() => onOpen("reply")} className="mt-3.5 block w-full rounded-xl border border-line bg-bg px-4 py-3 text-left transition-colors duration-150 hover:border-line-strong">
+              <span className={cx("flex items-center gap-1.5 text-[12px] font-medium", sent ? "text-ok" : "text-accent-text")}>
+                <EnvelopeSimple size={13} weight="fill" /> {sent ? "Sent with Gmail" : "Draft reply · not sent yet"}
+              </span>
+              <span className="mt-1.5 line-clamp-4 block whitespace-pre-line text-[14px] leading-relaxed text-ink-2">{draftBody.replace(/\n{2,}/g, "\n")}</span>
+            </button>
+          ) : null}
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            {primary}
+            {!sent ? (
+              <Button variant="secondary" onClick={() => void cmd.complete(task)}>
+                <Check size={16} /> Done
+              </Button>
+            ) : null}
+            {isNew ? (
+              <Button variant="ghost" onClick={() => void cmd.dismiss(task)}>
+                Not a to-do
+              </Button>
+            ) : null}
+            <div className="ml-auto">
+              <TaskMenu task={task} onOpen={onOpen} />
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </motion.li>
   );
 }

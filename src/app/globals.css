@@ -1,56 +1,39 @@
 @import "tailwindcss";
 
 /*
-  LooseEnds v2 tokens. Direction: product-first workspace (Linear, Supabase), dark-first, follows the system.
-  Every neutral is tinted with the brand hue (185). One accent: deep brand as fill, bright brand as text.
-  Amber = needs you. Red = overdue / failed. Muted text is an alpha ladder of the one ink.
-  Radii: controls 8px (rounded-lg), panels 12px (rounded-xl), pills only for chips.
-  Signature: the work stream (mono voice, live lines) on the home screen.
+  LooseEnds v3 tokens. Direction: warm paper workspace (Manus, Rox, Lindy). Light only.
+  Every neutral is tinted warm (hue 85). Buttons are ink. One accent, burnt orange, for links and "needs you".
+  Green = done / sent. Red = overdue / failed. Muted text is an alpha ladder of the one ink.
+  Radii: controls 8px, cards 14px, composer 18px, pills for chips.
+  Signature: the serif status line and the composer with the live read of your inbox under it.
 */
 :root {
-  --bg: oklch(0.975 0.004 185);
-  --surface: oklch(0.995 0.002 185);
-  --surface-2: oklch(0.948 0.006 185);
-  --ink: oklch(0.22 0.012 185);
-  --line: oklch(0.22 0.012 185 / 0.09);
-  --line-strong: oklch(0.22 0.012 185 / 0.16);
-  --accent: oklch(0.47 0.092 175);
-  --accent-hover: oklch(0.42 0.088 175);
-  --accent-ink: oklch(0.985 0.01 175);
-  --accent-text: oklch(0.42 0.09 175);
-  --warn: oklch(0.5 0.115 70);
-  --danger: oklch(0.52 0.17 27);
-  --shadow: 0 1px 1px oklch(0.3 0.03 185 / 0.04), 0 4px 12px -6px oklch(0.3 0.03 185 / 0.08);
-  --shadow-lg: 0 2px 4px oklch(0.3 0.03 185 / 0.05), 0 12px 28px -10px oklch(0.3 0.03 185 / 0.09), 0 32px 64px -24px oklch(0.3 0.03 185 / 0.09);
+  --bg: oklch(0.975 0.006 85);
+  --sidebar: oklch(0.955 0.008 85);
+  --surface: oklch(0.998 0.002 85);
+  --surface-2: oklch(0.948 0.008 85);
+  --ink: oklch(0.21 0.008 60);
+  --line: oklch(0.21 0.008 60 / 0.09);
+  --line-strong: oklch(0.21 0.008 60 / 0.16);
+  --accent: oklch(0.21 0.008 60);
+  --accent-hover: oklch(0.32 0.012 60);
+  --accent-ink: oklch(0.985 0.005 85);
+  --accent-text: oklch(0.53 0.15 45);
+  --warn: oklch(0.52 0.12 68);
+  --danger: oklch(0.53 0.19 27);
+  --ok: oklch(0.5 0.11 155);
+  --shadow: 0 1px 2px oklch(0.3 0.03 70 / 0.05), 0 4px 14px -6px oklch(0.3 0.03 70 / 0.08);
+  --shadow-lg: 0 1px 2px oklch(0.3 0.03 70 / 0.05), 0 10px 30px -10px oklch(0.3 0.03 70 / 0.12), 0 30px 60px -30px oklch(0.3 0.03 70 / 0.12);
   color-scheme: light;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: oklch(0.165 0.006 185);
-    --surface: oklch(0.2 0.007 185);
-    --surface-2: oklch(0.24 0.008 185);
-    --ink: oklch(0.955 0.004 185);
-    --line: oklch(1 0 0 / 0.075);
-    --line-strong: oklch(1 0 0 / 0.14);
-    --accent: oklch(0.53 0.1 175);
-    --accent-hover: oklch(0.58 0.105 175);
-    --accent-ink: oklch(0.99 0.008 175);
-    --accent-text: oklch(0.82 0.125 175);
-    --warn: oklch(0.82 0.12 80);
-    --danger: oklch(0.74 0.15 25);
-    --shadow: 0 1px 0 oklch(1 0 0 / 0.03) inset;
-    --shadow-lg: 0 1px 0 oklch(1 0 0 / 0.05) inset, 0 24px 60px -20px oklch(0 0 0 / 0.6);
-    color-scheme: dark;
-  }
 }
 
 :root {
   --ink-2: color-mix(in oklab, var(--ink) 80%, transparent);
-  --muted: color-mix(in oklab, var(--ink) 58%, transparent);
-  --accent-soft: color-mix(in oklab, var(--accent-text) 13%, transparent);
-  --warn-soft: color-mix(in oklab, var(--warn) 14%, transparent);
-  --danger-soft: color-mix(in oklab, var(--danger) 13%, transparent);
+  --muted: color-mix(in oklab, var(--ink) 56%, transparent);
+  --accent-soft: color-mix(in oklab, var(--accent-text) 11%, transparent);
+  --warn-soft: color-mix(in oklab, var(--warn) 13%, transparent);
+  --danger-soft: color-mix(in oklab, var(--danger) 10%, transparent);
+  --ok-soft: color-mix(in oklab, var(--ok) 12%, transparent);
 }
 
 @theme inline {
@@ -71,6 +54,10 @@
   --color-warn-soft: var(--warn-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-sidebar: var(--sidebar);
+  --font-serif: var(--font-serif-display);
   --shadow-card: var(--shadow);
   --shadow-float: var(--shadow-lg);
   --font-sans: var(--font-geist-sans);

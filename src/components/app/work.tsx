@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AskAnswer, CaptureResult, Connections, ScanEvent, Task, Toolkit } from "@/lib/types";
 import { api, ApiFailure } from "./api";
+import { senderName } from "./bits";
 import { useStore } from "./store";
 
 /** One line in the work stream: what LooseEnds is doing, as it does it. */
@@ -162,10 +163,10 @@ export function WorkProvider({ children }: { children: ReactNode }) {
           else if (ev.type === "email") {
             if (ev.outcome === "tasks" && ev.tasks.length) {
               upsertMany(ev.tasks);
-              say("found", ev.tasks.map((t) => t.title).join(" · "), { sub: `${ev.from} · ${ev.subject}`, taskIds: ev.tasks.map((t) => t.id) });
+              say("found", ev.tasks.map((t) => t.title).join(" · "), { sub: `${senderName(ev.from) ?? ev.from} · ${ev.subject}`, taskIds: ev.tasks.map((t) => t.id) });
             } else {
               const why = ev.outcome === "promotional" ? "marketing" : ev.outcome === "duplicate" ? "already on your list" : "nothing to do";
-              say("skip", `${ev.subject || "(no subject)"}`, { sub: `${ev.from} · ${why}` });
+              say("skip", `${ev.subject || "(no subject)"}`, { sub: `${senderName(ev.from) ?? ev.from} · ${why}` });
             }
           } else if (ev.type === "done") {
             say("done", ev.found ? `Found ${ev.found} ${ev.found === 1 ? "thing" : "things"} to do in ${ev.scanned} emails` : `Read ${ev.scanned} emails. Nothing new needs you.`);

@@ -3,18 +3,48 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
-import { ClockCounterClockwise, GearSix, Plus, SunHorizon, type Icon } from "@phosphor-icons/react";
+import { ClockCounterClockwise, GearSix, House, Plus, type Icon } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import type { Action, Task } from "@/lib/types";
 import { Wordmark } from "../brand";
 import { cx } from "../ui";
 import { api } from "./api";
 import { useStore } from "./store";
+import { CalendarLogo, GmailLogo } from "./bits";
+import { useWork } from "./work";
+import type { Toolkit } from "@/lib/types";
+
+const navCls = "flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-[14px] font-medium transition-colors duration-150";
+
+function AccountRow({ toolkit, name, logo }: { toolkit: Toolkit; name: string; logo: ReactNode }) {
+  const w = useWork();
+  const c = w.connections;
+  const on = !!c?.[toolkit].connected;
+  return (
+    <li className="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-[14px] text-ink-2">
+      {logo}
+      <span className="font-medium">{name}</span>
+      {on ? (
+        <span className="ml-auto inline-flex items-center gap-1.5 text-[12px] text-muted">
+          <span className="size-1.5 rounded-full bg-ok" aria-hidden /> On
+        </span>
+      ) : (
+        <button
+          onClick={() => void w.connect(toolkit)}
+          disabled={!c || c.available === false || !!w.linking}
+          className="ml-auto rounded-md px-1.5 py-0.5 text-[12.5px] font-medium text-accent-text hover:bg-accent-soft disabled:text-muted disabled:hover:bg-transparent"
+        >
+          {w.linking === toolkit ? "Waiting…" : "Connect"}
+        </button>
+      )}
+    </li>
+  );
+}
 
 const NAV: { href: string; label: string; icon: Icon }[] = [
-  { href: "/", label: "Today", icon: SunHorizon },
-  { href: "/capture", label: "Capture", icon: Plus },
-  { href: "/history", label: "History", icon: ClockCounterClockwise },
+  { href: "/", label: "Today", icon: House },
+  { href: "/capture", label: "Add", icon: Plus },
+  { href: "/history", label: "Done", icon: ClockCounterClockwise },
 ];
 
 export function Shell({ children }: { children: ReactNode }) {
@@ -26,41 +56,31 @@ export function Shell({ children }: { children: ReactNode }) {
   useDueReminders();
 
   return (
-    <div className="min-h-[100dvh] lg:grid lg:grid-cols-[232px_1fr]">
-      <aside className="sticky top-0 hidden h-[100dvh] flex-col border-r border-line px-4 py-5 lg:flex">
+    <div className="min-h-[100dvh] lg:grid lg:grid-cols-[248px_1fr]">
+      <aside className="sticky top-0 hidden h-[100dvh] flex-col border-r border-line bg-sidebar px-3 py-4 lg:flex">
         <Wordmark href="/" className="px-2" />
-        <nav className="mt-8 space-y-0.5" aria-label="Main">
+        <nav className="mt-6 space-y-0.5" aria-label="Main">
           {NAV.map((n) => {
             const active = n.href === "/" ? path === "/" : path.startsWith(n.href);
             return (
-              <Link
-                key={n.href}
-                href={n.href}
-                aria-current={active ? "page" : undefined}
-                className={cx(
-                  "flex h-10 items-center gap-3 rounded-lg px-3 text-[14px] font-medium transition-colors",
-                  active ? "bg-surface text-ink shadow-card" : "text-muted hover:bg-surface-2 hover:text-ink",
-                )}
-              >
-                <n.icon size={18} weight={active ? "fill" : "regular"} className={active ? "text-accent" : undefined} />
+              <Link key={n.href} href={n.href} aria-current={active ? "page" : undefined} className={cx(navCls, active ? "bg-ink/[0.07] text-ink" : "text-ink-2 hover:bg-ink/[0.045] hover:text-ink")}>
+                <n.icon size={17} weight={active ? "fill" : "regular"} />
                 {n.label}
-                {n.href === "/" && openCount ? (
-                  <span className="ml-auto text-xs tabular-nums text-muted">{openCount}</span>
-                ) : null}
+                {n.href === "/" && openCount ? <span className="ml-auto text-[12px] tabular-nums text-muted">{openCount}</span> : null}
               </Link>
             );
           })}
         </nav>
+
+        <div className="mt-7 px-2.5 text-[11.5px] font-medium text-muted">Accounts</div>
+        <ul className="mt-1.5 space-y-0.5">
+          <AccountRow toolkit="gmail" name="Gmail" logo={<GmailLogo size={15} />} />
+          <AccountRow toolkit="googlecalendar" name="Calendar" logo={<CalendarLogo size={15} />} />
+        </ul>
+
         <div className="mt-auto">
-          <Link
-            href="/settings"
-            aria-current={path.startsWith("/settings") ? "page" : undefined}
-            className={cx(
-              "flex h-10 items-center gap-3 rounded-lg px-3 text-[14px] font-medium transition-colors",
-              path.startsWith("/settings") ? "bg-surface text-ink shadow-card" : "text-muted hover:bg-surface-2 hover:text-ink",
-            )}
-          >
-            <GearSix size={18} />
+          <Link href="/settings" aria-current={path.startsWith("/settings") ? "page" : undefined} className={cx(navCls, path.startsWith("/settings") ? "bg-ink/[0.07] text-ink" : "text-ink-2 hover:bg-ink/[0.045] hover:text-ink")}>
+            <GearSix size={17} />
             Settings
           </Link>
         </div>
@@ -95,7 +115,7 @@ export function Shell({ children }: { children: ReactNode }) {
                     <Plus size={20} weight="bold" />
                   </span>
                 ) : (
-                  <n.icon size={22} weight={active ? "fill" : "regular"} className={active ? "text-accent" : undefined} />
+                  <n.icon size={22} weight={active ? "fill" : "regular"} />
                 )}
                 {n.href === "/capture" ? null : n.label}
               </Link>
