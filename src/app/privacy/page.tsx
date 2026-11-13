@@ -10,9 +10,9 @@ const SECTIONS: [string, string[]][] = [
     [
       "The text of messages you paste, the text read from screenshots, and the text extracted from PDFs. Image and PDF files themselves are not kept.",
       "The tasks, drafts, calendar events and reminders created from them, and receipts of what you did with them.",
-      "Your publik handle, so your list follows you between devices, and your time zone, so dates are right.",
-      "If you choose to use your own AI key, that key, encrypted.",
-      "Simple usage events (for example \"a task was completed\") without any message content, to learn which features help.",
+      "Everything is stored on your own computer, in the LooseEnds folder in your app data. Nothing is kept on a LooseEnds server.",
+      "Your publik handle and time zone (so dates are right), and, if you choose to use your own AI key, that key, encrypted.",
+      "Simple usage events (for example \"a task was completed\") without any message content. These stay on your computer too.",
     ],
   ],
   [
@@ -27,7 +27,7 @@ const SECTIONS: [string, string[]][] = [
     "Deleting your data",
     [
       "Delete a task, or delete a source to remove it together with every task found in it.",
-      "Settings → Delete everything permanently removes your account data from LooseEnds' database.",
+      "Settings → Delete everything permanently removes your data from this computer and signs this computer out of publik.",
     ],
   ],
   [

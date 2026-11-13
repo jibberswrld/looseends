@@ -1,12 +1,10 @@
-import { headers } from "next/headers";
 import type { GateInfo } from "@/lib/types";
-import { encrypt } from "./crypto";
 import { sql, type Row } from "./db";
 import { HttpError } from "./http";
 import {
-  gateWords, isConfigured, ORIGIN, provision, PublikUnreachable, readWallet, USES_AI, type PublikOS, type Wallet,
+  gateWords, installKey, isConfigured, ORIGIN, provision, PublikUnreachable, readCredential, readWallet, USES_AI, writeCredential, type Wallet,
 } from "./publik";
-import { deviceName, requestTimezone, sessionKey } from "./session";
+import { requestTimezone } from "./session";
 import { track } from "./track";
 
 const hasPlanOf = (w: Wallet | null) => !!w && (w.plan.kind !== "none" || w.balance_micros > 0);
@@ -28,19 +26,12 @@ function info(state: GateInfo["state"], w: Wallet | null, s: Row | null, extra: 
   };
 }
 
-/** Load or provision this session's publik key. */
+/** Load or provision this computer's publik key (publik's per-app credential file). */
 async function ensureKey(s: Row): Promise<string> {
-  const existing = sessionKey(s);
+  const existing = installKey();
   if (existing) return existing;
-  const ua = (await headers()).get("user-agent") ?? "";
-  const inst = await provision({ installId: s.install_id, os: s.os as PublikOS, deviceName: deviceName(ua) });
-  await sql`
-    update sessions set publik_key_enc = ${encrypt(inst.key)}, publik_base_url = ${inst.base_url},
-      install_id = ${inst.install_id}, claim_url = ${inst.claim_url}
-    where id = ${s.id}`;
-  s.install_id = inst.install_id;
+  const inst = await provision({ installId: readCredential()?.install_id });
   s.claim_url = inst.claim_url;
-  s.publik_base_url = inst.base_url;
   return inst.key;
 }
 
@@ -78,8 +69,8 @@ export async function computeGate(s: Row): Promise<GateInfo> {
       const r = await readWallet(key);
       if (r.status === 401 && !process.env.PUBLIK_API_KEY && attempt === 0) {
         // A revoked key: provision again.
-        await sql`update sessions set publik_key_enc = null, claim_state = 'anonymous', user_id = null where id = ${s.id}`;
-        s.publik_key_enc = null;
+        writeCredential(null);
+        await sql`update sessions set claim_state = 'anonymous', user_id = null where id = ${s.id}`;
         continue;
       }
       if (!r.wallet) {
@@ -95,7 +86,7 @@ export async function computeGate(s: Row): Promise<GateInfo> {
 
   if (w.claim_state !== "claimed") {
     if (s.claim_state === "claimed") await sql`update sessions set claim_state = 'anonymous', user_id = null where id = ${s.id}`;
-    return info("sign_in", w, s, { ...gateWords("sign_in", w), claimUrl: w.claim_url ?? s.claim_url ?? `${ORIGIN}/wallet` });
+    return info("sign_in", w, s, { ...gateWords("sign_in", w), claimUrl: w.claim_url ?? readCredential()?.claim_url ?? `${ORIGIN}/wallet` });
   }
 
   await linkUser(s, w);
@@ -110,7 +101,7 @@ export async function setChoice(s: Row, choice: "publik" | "own_key" | null) {
 }
 
 export async function freshWallet(s: Row): Promise<Wallet> {
-  const key = sessionKey(s);
+  const key = installKey();
   if (!key) throw new HttpError(401, "gate", "Sign in with publik to continue.");
   try {
     const r = await readWallet(key);

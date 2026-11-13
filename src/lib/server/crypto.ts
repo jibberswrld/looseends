@@ -1,9 +1,8 @@
+import { localSecret } from "./local";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
 function key(): Buffer {
-  const secret = process.env.APP_SECRET;
-  if (!secret || secret.length < 32) throw new Error("APP_SECRET must be set (32+ characters).");
-  return createHash("sha256").update(secret).digest();
+  return createHash("sha256").update(localSecret()).digest();
 }
 
 /** AES-256-GCM. Output: base64url(iv).base64url(tag).base64url(ciphertext) */

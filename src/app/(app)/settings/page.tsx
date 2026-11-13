@@ -82,7 +82,7 @@ export default function SettingsPage() {
             <Skeleton className="h-4 w-48" />
           )}
           <Button size="sm" variant="secondary" className="mt-4" onClick={() => void signOut()}>
-            <SignOut size={15} /> Sign out on this device
+            <SignOut size={15} /> Sign out on this computer
           </Button>
         </Row>
 
