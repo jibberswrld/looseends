@@ -2,6 +2,8 @@
 
 An AI assistant for the everyday tasks that slip through the cracks. Paste a message, email, screenshot or PDF. LooseEnds finds what needs doing, shows the exact sentence it came from, and prepares the next step: a reply draft, a calendar event, or a reminder. Nothing is ever sent, booked or paid on your behalf.
 
+**Use it in your browser: https://looseends-taupe.vercel.app** (hosted web app, nothing to install).
+
 Runs on [publik](https://publikhq.com): Sign in with publik, and AI billed to your publik plan (or your own OpenAI-compatible key).
 
 ## What it does
