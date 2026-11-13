@@ -2,42 +2,73 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, type ReactNode } from "react";
-import { ClockCounterClockwise, GearSix, House, Plus, type Icon } from "@phosphor-icons/react";
+import { useEffect, useState, type ReactNode } from "react";
+import { CaretRight, ClockCounterClockwise, GearSix, House, Plus, type Icon } from "@phosphor-icons/react";
 import { toast } from "sonner";
-import type { Action, Task } from "@/lib/types";
+import type { Action, ConnectorApp, Task } from "@/lib/types";
 import { Wordmark } from "../brand";
 import { cx } from "../ui";
 import { api } from "./api";
 import { useStore } from "./store";
-import { CalendarLogo, GmailLogo } from "./bits";
-import { useWork } from "./work";
-import type { Toolkit } from "@/lib/types";
+import { AppLogo } from "./bits";
+import { appsOf, useWork } from "./work";
 
 const navCls = "flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-[14px] font-medium transition-colors duration-150";
 
-function AccountRow({ toolkit, name, logo }: { toolkit: Toolkit; name: string; logo: ReactNode }) {
+function AppRow({ app }: { app: ConnectorApp }) {
   const w = useWork();
   const c = w.connections;
-  const on = !!c?.[toolkit].connected;
   return (
     <li className="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-[14px] text-ink-2">
-      {logo}
-      <span className="font-medium">{name}</span>
-      {on ? (
-        <span className="ml-auto inline-flex items-center gap-1.5 text-[12px] text-muted">
+      <AppLogo slug={app.slug} name={app.name} logo={app.logo} size={15} />
+      <span className="min-w-0 truncate font-medium" title={app.name}>{app.name}</span>
+      {app.connected ? (
+        <span className="ml-auto inline-flex shrink-0 items-center gap-1.5 text-[12px] text-muted">
           <span className="size-1.5 rounded-full bg-ok" aria-hidden /> On
         </span>
       ) : (
         <button
-          onClick={() => void w.connect(toolkit)}
+          onClick={() => void w.connect(app.slug)}
           disabled={!c || c.available === false || !!w.linking}
-          className="ml-auto rounded-md px-1.5 py-0.5 text-[12.5px] font-medium text-accent-text hover:bg-accent-soft disabled:text-muted disabled:hover:bg-transparent"
+          aria-label={`Connect ${app.name}`}
+          className="-mr-1 ml-auto shrink-0 rounded-md px-1.5 py-0.5 text-[12.5px] font-medium text-accent-text hover:bg-accent-soft disabled:text-muted disabled:hover:bg-transparent"
         >
-          {w.linking === toolkit ? "Waiting…" : "Connect"}
+          {w.linking === app.slug ? "Waiting…" : "Connect"}
         </button>
       )}
     </li>
+  );
+}
+
+const LEAD = ["gmail", "googlecalendar"];
+
+/** Gmail and Calendar first, then whatever else is connected; the rest wait behind "More apps". */
+function Apps() {
+  const { connections } = useWork();
+  const [more, setMore] = useState(false);
+  const apps = appsOf(connections);
+  const shown = [...apps.filter((a) => LEAD.includes(a.slug)), ...apps.filter((a) => !LEAD.includes(a.slug) && a.connected)];
+  const rest = apps.filter((a) => !shown.includes(a));
+  return (
+    <div className="mt-7 flex min-h-0 flex-col">
+      <div className="px-2.5 text-[11.5px] font-medium text-muted">Apps</div>
+      <ul className="scrollbar-none mt-1.5 min-h-0 space-y-0.5 overflow-y-auto">
+        {shown.map((a) => (
+          <AppRow key={a.slug} app={a} />
+        ))}
+        {rest.length ? (
+          <li>
+            <button onClick={() => setMore((v) => !v)} aria-expanded={more} className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-[13.5px] text-muted transition-colors duration-150 hover:bg-ink/[0.045] hover:text-ink">
+              <CaretRight size={12} weight="bold" className={cx("transition-transform duration-150", more && "rotate-90")} />
+              More apps
+              <span className="ml-auto text-[12px] tabular-nums">{rest.length}</span>
+            </button>
+          </li>
+        ) : null}
+        {more ? rest.map((a) => <AppRow key={a.slug} app={a} />) : null}
+      </ul>
+      {connections && !connections.available && connections.message ? <p className="mt-1.5 px-2.5 text-[12px] leading-snug text-muted">{connections.message}</p> : null}
+    </div>
   );
 }
 
@@ -72,13 +103,9 @@ export function Shell({ children }: { children: ReactNode }) {
           })}
         </nav>
 
-        <div className="mt-7 px-2.5 text-[11.5px] font-medium text-muted">Accounts</div>
-        <ul className="mt-1.5 space-y-0.5">
-          <AccountRow toolkit="gmail" name="Gmail" logo={<GmailLogo size={15} />} />
-          <AccountRow toolkit="googlecalendar" name="Calendar" logo={<CalendarLogo size={15} />} />
-        </ul>
+        <Apps />
 
-        <div className="mt-auto">
+        <div className="mt-auto pt-4">
           <Link href="/settings" aria-current={path.startsWith("/settings") ? "page" : undefined} className={cx(navCls, path.startsWith("/settings") ? "bg-ink/[0.07] text-ink" : "text-ink-2 hover:bg-ink/[0.045] hover:text-ink")}>
             <GearSix size={17} />
             Settings

@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import type { Action, EventPayload, ReplyPayload, Source, Task } from "@/lib/types";
 import { Button, Chip, cx, Input, Label, Select, Skeleton, Textarea } from "../ui";
 import { api } from "./api";
+import { sourceLabel } from "./bits";
 import { formatDue, fromLocalInput, toLocalDateInput, toLocalInput, timeAgo } from "./dates";
 import { reportError, useStore } from "./store";
 import { DueChip, STATUS_FLOW } from "./task-bits";
@@ -925,7 +926,7 @@ function SourcePanel({ task, onDeleted }: { task: Task; onDeleted: () => void })
     <div className="space-y-4">
       <div className="flex items-center gap-2.5 text-[13px] text-muted">
         {source.kind === "text" ? <EnvelopeSimple size={16} /> : <FileText size={16} />}
-        <span className="font-medium text-ink-2">{source.title}</span>
+        <span className="font-medium text-ink-2">{sourceLabel(source)}</span>
         <span>· {timeAgo(source.createdAt)}</span>
       </div>
       {source.injectionDetected ? (

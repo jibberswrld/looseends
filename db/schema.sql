@@ -109,6 +109,35 @@ alter table users add column if not exists gmail_last_scan_at timestamptz;
 alter table sources add column if not exists external_id text; -- gmail message id
 alter table sources add column if not exists thread_id text;
 alter table sources add column if not exists sender text;
+alter table sources add column if not exists sender_address text;
 create unique index if not exists sources_user_external_idx on sources(user_id, external_id) where external_id is not null;
 alter table actions add column if not exists external_id text; -- gmail message / draft id, or calendar event id
 alter table actions add column if not exists sent_at timestamptz; -- set before sending: at most one send per action
+
+create table if not exists agent_messages (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  role text not null,
+  text text not null default '',
+  steps jsonb not null default '[]'::jsonb,
+  task_ids jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now()
+);
+create index if not exists agent_messages_user_time_idx on agent_messages(user_id, created_at);
+
+create table if not exists agent_actions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  message_id uuid not null references agent_messages(id) on delete cascade,
+  app text not null,
+  tool text not null,
+  title text not null,
+  summary text not null,
+  args jsonb not null,
+  status text not null default 'pending',
+  result text,
+  error text,
+  started_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists agent_actions_message_idx on agent_actions(message_id);

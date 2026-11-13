@@ -1,11 +1,12 @@
 // Client for the LooseEnds connector service (src/app/api/connector/**, hosted). It holds the Composio key;
 // this computer proves who it is with its publik key. Nothing here ever throws for a connector that is down.
-import type { Toolkit } from "@/lib/types";
+import type { ConnectorApp, Toolkit } from "@/lib/types";
+import type { ConnectorTool } from "./composio";
 import { HttpError } from "./http";
 import { installKey } from "./publik";
 
 const ORIGIN = (process.env.CONNECTOR_ORIGIN || "https://looseends-taupe.vercel.app").replace(/\/$/, "");
-export const UNAVAILABLE = "Gmail and Calendar connections aren't available right now. Try again in a moment.";
+export const UNAVAILABLE = "App connections aren't available right now. Try again in a moment.";
 
 export type ConnectorResult<T> =
   | { ok: true; data: T }
@@ -39,15 +40,16 @@ async function call<T>(path: string, body: unknown | null, timeoutMs = 20_000): 
   return fail("error", code, message, res.status >= 500 && code !== "tool_failed");
 }
 
-export const connectorStatus = () => call<Record<Toolkit, boolean>>("status", null);
+export const connectorStatus = () => call<{ gmail: boolean; googlecalendar: boolean; apps: ConnectorApp[]; [toolkit: string]: boolean | ConnectorApp[] }>("status", null);
 export const connectorLink = (toolkit: Toolkit) => call<{ url: string }>("link", { toolkit });
 export const connectorDisconnect = (toolkit: Toolkit) => call<{ ok: true }>("disconnect", { toolkit });
-/** Run one tool. The connector enforces the allowlist; this app only ever asks for the five it needs. */
+export const connectorTools = (query: string, toolkits?: Toolkit[]) => call<{ tools: ConnectorTool[] }>("tools", { query, toolkits }, 40_000);
+/** Run one tool. The connector verifies its toolkit and the caller's connection. */
 export const connectorRun = (tool: string, args: Record<string, unknown>) => call<{ data: Record<string, unknown> }>("run", { tool, arguments: args }, 60_000);
 
 /** For routes where a connector failure is the response. */
 export function connectorError(r: Extract<ConnectorResult<unknown>, { ok: false }>, toolkit: Toolkit): HttpError {
-  if (r.kind === "not_connected") return new HttpError(409, "not_connected", toolkit === "gmail" ? "Connect Gmail first." : "Connect Google Calendar first.");
+  if (r.kind === "not_connected") return new HttpError(409, "not_connected", `Connect ${toolkit} first.`);
   if (r.kind === "unavailable") return new HttpError(503, "unavailable", r.message);
   return new HttpError(r.code === "gate" ? 401 : 502, r.code, r.message);
 }

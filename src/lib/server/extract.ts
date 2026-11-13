@@ -217,8 +217,10 @@ Return ONLY one JSON object, no prose, with exactly these keys:
 
 Rules:
 - One task per distinct obligation. Do not split one action into several, do not merge different actions.
-- Only include things the reader must actually do. Small talk, FYI updates and greetings are "no_action" with an empty tasks list.
-- Newsletters, sales, ads and marketing emails are "promotional"; their calls-to-action are not obligations. Include a task only if the message ALSO contains a genuine obligation (e.g. an expiring account the user must act on), and mark sale/shop CTAs is_promotional: true.
+- For email, create a task only when a real person or organization needs the user to do something. Verification, one-time and login codes; sign-in or security alerts; password resets; receipts and order confirmations; shipping or delivery updates; automated app notifications (GitHub, social, SaaS digests); newsletters; and marketing are no_action or promotional with an EMPTY tasks list. An automated email may create a task only if it sets a real deadline for user action, such as "return by Dec 3" or "payment failed, update your card". Judge the meaning, not just the sender or subject.
+- Examples with tasks: "Please confirm your appointment by Friday" → Confirm appointment. "Your payment failed; update your card by Dec 3" → Update payment card. "Return this item by Dec 3 for a refund" → Return item.
+- Examples with no tasks: "Your code is 123456"; "New sign-in detected"; "Your order has shipped"; "Your receipt"; "GitHub: new issue comment"; "Your weekly digest"; "20% off this week". A purchase, security event, or app notification by itself is information, not a task.
+- Only include things the reader must actually do. Small talk, FYI updates and greetings are "no_action" with an empty tasks list. Marketing calls to shop or subscribe are never tasks.
 - NEVER invent a date. If the source gives no date for a task, due_text, due_date and due_time are null and due_kind is "none". If it gives a vague deadline, due_kind is "vague" and due_date is null.
 - A deadline tied to something whose date the source doesn't give ("before your visit", "before the trip", "at check-in", "before your first day") is "vague": set due_text to that exact phrase and due_date to null. Don't use "none" when the source states any deadline at all.
 - A bare weekday ("Thursday") means its next occurrence. If that weekday is today and the stated time has already passed, use the same weekday next week.

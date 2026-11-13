@@ -2,21 +2,20 @@
 // never on a user's computer: the repo is public, so the Composio project key cannot ship with the app.
 // The local app calls /api/connector/* server-to-server with this computer's publik key (see connector.ts).
 import { Composio } from "@composio/core";
-import type { Toolkit } from "@/lib/types";
+import type { ConnectorApp, Toolkit } from "@/lib/types";
 import { sha256 } from "./crypto";
 import { HttpError } from "./http";
 import { PublikUnreachable, readWallet } from "./publik";
 
-export const TOOLKITS: Toolkit[] = ["gmail", "googlecalendar"];
-
-/** The only actions this service will ever run. The server decides this, not a model and not the caller. */
-export const ALLOWED_TOOLS: Record<string, Toolkit> = {
-  GMAIL_FETCH_EMAILS: "gmail",
-  GMAIL_CREATE_EMAIL_DRAFT: "gmail",
-  GMAIL_REPLY_TO_THREAD: "gmail",
-  GMAIL_SEND_EMAIL: "gmail",
-  GOOGLECALENDAR_CREATE_EVENT: "googlecalendar",
-};
+export const TOOLKITS: Toolkit[] = ["gmail", "googlecalendar", "outlook", "slack", "notion", "googledrive", "googledocs", "googlesheets", "github", "linear", "todoist"];
+export interface ConnectorTool {
+  slug: string;
+  toolkit: string;
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  readOnly: boolean;
+}
 
 const VERIFY_TTL_MS = 5 * 60_000;
 const verified = new Map<string, { handle: string; until: number }>();
@@ -48,11 +47,11 @@ async function verifyCaller(req: Request): Promise<string> {
 export async function connectorCaller(req: Request) {
   const userId = await verifyCaller(req);
   const apiKey = process.env.COMPOSIO_API_KEY;
-  if (!apiKey) throw new HttpError(503, "connector_not_configured", "Gmail and Calendar connections aren't switched on yet.");
+  if (!apiKey) throw new HttpError(503, "connector_not_configured", "App connections aren't switched on yet.");
   return { userId, composio: new Composio({ apiKey }) };
 }
 
-/** The caller plus a Composio session scoped to the two toolkits. */
+/** The caller plus a Composio session scoped to supported toolkits. */
 export async function connectorSession(req: Request) {
   const { userId, composio } = await connectorCaller(req);
   try {
@@ -67,22 +66,37 @@ type Session = Awaited<ReturnType<typeof connectorSession>>["session"];
 export function upstream(e: unknown): HttpError {
   if (e instanceof HttpError) return e;
   console.error("[connector]", e instanceof Error ? `${e.name}: ${e.message}` : e);
-  return new HttpError(502, "connector_error", "Google didn't answer. Please try again in a moment.");
+  return new HttpError(502, "connector_error", "The connected app didn't answer. Please try again in a moment.");
 }
 
-export async function connectionStatus(session: Session): Promise<Record<Toolkit, boolean>> {
+export async function connectionStatus(session: Session): Promise<{ gmail: boolean; googlecalendar: boolean; apps: ConnectorApp[]; [toolkit: string]: boolean | ConnectorApp[] }> {
   const { items } = await session.toolkits({ toolkits: TOOLKITS });
-  const active = (t: Toolkit) => items.some((i) => i.slug.toLowerCase() === t && i.connection?.isActive === true);
-  return { gmail: active("gmail"), googlecalendar: active("googlecalendar") };
+  const apps = TOOLKITS.map((slug) => {
+    const item = items.find((i) => i.slug.toLowerCase() === slug);
+    return { slug, name: item?.name ?? slug, logo: item?.logo ?? null, connected: item?.connection?.isActive === true };
+  });
+  return { ...Object.fromEntries(apps.map((a) => [a.slug, a.connected])), gmail: apps[0].connected, googlecalendar: apps[1].connected, apps };
 }
 
 export function parseToolkit(v: unknown): Toolkit {
-  if (v === "gmail" || v === "googlecalendar") return v;
-  throw new HttpError(400, "invalid_request", "toolkit must be gmail or googlecalendar.");
+  if (typeof v === "string" && TOOLKITS.includes(v)) return v;
+  throw new HttpError(400, "invalid_request", "Unsupported app.");
+}
+
+export async function toolMetadata(composio: Composio, slug: string): Promise<ConnectorTool> {
+  const tool = await composio.tools.getRawComposioToolBySlug(slug);
+  const toolkit = tool.toolkit?.slug?.toLowerCase() ?? "";
+  if (!TOOLKITS.includes(toolkit)) throw new HttpError(403, "tool_not_allowed", "LooseEnds can't use that tool.");
+  const tags = tool.tags ?? [];
+  return {
+    slug: tool.slug, toolkit, name: tool.name, description: tool.description ?? "",
+    parameters: tool.inputParameters as Record<string, unknown>,
+    readOnly: tags.includes("readOnlyHint") && !tags.includes("destructiveHint") && !tags.includes("createHint") && !tags.includes("updateHint"),
+  };
 }
 
 // ---------- GMAIL_FETCH_EMAILS: keep the reply small ----------
-const BODY_LIMIT = 20_000;
+const BODY_LIMIT = 8_000;
 type Part = { mimeType?: string; body?: { data?: string }; parts?: Part[] };
 
 function partText(p: Part | undefined, mime: string): string {

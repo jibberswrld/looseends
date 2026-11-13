@@ -6,6 +6,7 @@ import { CaretDown } from "@phosphor-icons/react";
 import type { Me, Task } from "@/lib/types";
 import { api } from "@/components/app/api";
 import { dayDiff, greeting, isOverdue } from "@/components/app/dates";
+import { useAgent } from "@/components/app/agent";
 import { Composer, Item, Live } from "@/components/app/home";
 import { useStore } from "@/components/app/store";
 import type { Panel } from "@/components/app/task-card";
@@ -40,6 +41,7 @@ const NUM = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight
 export default function TodayPage() {
   const { open, history, error, refresh, selectedId, select } = useStore();
   const w = useWork();
+  const agent = useAgent();
   const [panel, setPanel] = useState<Panel>("details");
   const [handle, setHandle] = useState<string | null>(null);
   const [focus, setFocus] = useState<string | null | undefined>(undefined); // undefined = the first one, null = all closed
@@ -56,9 +58,13 @@ export default function TodayPage() {
     setPanel(p);
     select(id);
   };
+  const showTask = (id: string) => {
+    setFocus(id);
+    document.getElementById(`t-${id}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+  };
 
   const n = list.length;
-  const busy = !!w.running || w.lines.length > 0;
+  const busy = !!w.running || w.lines.length > 0 || agent.messages.length > 0 || !!agent.notice;
   const empty = !!groups && n === 0;
   const parts = groups ? [groups.overdue.length ? `${groups.overdue.length} overdue` : null, groups.soon.length ? `${groups.soon.length} due this week` : null, groups.later.length ? `${groups.later.length} later` : null].filter(Boolean) : [];
 
@@ -86,17 +92,17 @@ export default function TodayPage() {
           {!groups ? "Getting your list…" : empty ? (open!.length || history?.length ? "You're all caught up." : "What's on your plate?") : `${NUM[n] ?? n} ${n === 1 ? "thing needs" : "things need"} you.`}
         </h1>
         <p className={cx("mt-2.5 text-[15px] leading-relaxed text-ink-2", empty && "mx-auto max-w-[46ch]")}>
-          {empty ? "Give me your inbox or paste any message. I find what you need to do, write the reply, and wait for your OK before anything is sent." : parts.join(" · ")}
+          {empty ? "Ask about your inbox, or tell me what to do. I read your mail and connected apps, and nothing goes out until you approve it." : parts.join(" · ")}
         </p>
       </header>
 
       <div className="mt-7">
-        <Composer hasTasks={n > 0} />
+        <Composer hasTasks={n > 0} onOpenTask={showTask} />
       </div>
 
-      {busy ? (
+      {w.running || w.lines.length ? (
         <div className="mt-6">
-          <Live onOpenTask={(id) => { setFocus(id); document.getElementById(`t-${id}`)?.scrollIntoView({ block: "center", behavior: "smooth" }); }} />
+          <Live onOpenTask={showTask} />
         </div>
       ) : null}
 

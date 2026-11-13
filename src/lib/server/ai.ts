@@ -33,9 +33,12 @@ export function resolveProvider(session: Row, user: Row): Provider {
 
 export type ChatContent = string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
 export interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: ChatContent;
+  role: "system" | "user" | "assistant" | "tool";
+  content: ChatContent | null;
+  tool_call_id?: string;
+  tool_calls?: ToolCall[];
 }
+export interface ToolCall { id: string; type: "function"; function: { name: string; arguments: string } }
 
 export class AiRequestError extends HttpError {
   constructor(status: number, code: string, message: string, public detail: string, topUpUrl: string | null = null) {
@@ -94,6 +97,65 @@ export async function chat(p: Provider, messages: ChatMessage[], opts: { json?: 
     throw new AiRequestError(502, "ai_error", "The AI couldn't process this. Please try again.", detail);
   }
   throw new HttpError(503, "ai_unavailable", "The AI is having trouble right now. Please try again in a minute.");
+}
+
+/** OpenAI-compatible streaming tool call. Text is sent to the caller as it arrives. */
+export async function streamChat(
+  p: Provider, messages: ChatMessage[], tools: { type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } }[],
+  onText: (delta: string) => void, opts: { maxTokens?: number; toolChoice?: "none" } = {},
+): Promise<{ content: string; toolCalls: ToolCall[] }> {
+  const body = JSON.stringify({ model: p.kind === "publik" ? MODELS.smart : p.model, messages, tools, stream: true, temperature: 0.2, max_tokens: opts.maxTokens ?? 1800, ...(opts.toolChoice ? { tool_choice: opts.toolChoice } : {}) });
+  if (Buffer.byteLength(body) > MAX_BYTES) throw new HttpError(413, "too_large", "That conversation is too large. Start a new chat.");
+  let res: Response;
+  try {
+    res = await fetch(`${p.baseURL.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${p.apiKey}` }, body, signal: AbortSignal.timeout(90_000),
+    });
+  } catch {
+    throw new HttpError(503, "ai_unreachable", p.kind === "publik" ? "publik is not reachable. Check your connection." : "Your AI provider is not reachable right now.");
+  }
+  if (!res.ok) {
+    const raw = await res.text();
+    let parsed: Record<string, any> = {}; // eslint-disable-line @typescript-eslint/no-explicit-any
+    try { parsed = JSON.parse(raw); } catch { /* non-JSON response */ }
+    if (res.status === 402) {
+      const t = topUpUrlFrom402(parsed);
+      throw new AiRequestError(402, "payment_required", t.message, raw.slice(0, 500), t.url);
+    }
+    const detail = parsed.error?.message ?? raw.slice(0, 300);
+    if (res.status === 401 || res.status === 403) throw new AiRequestError(401, p.kind === "own" ? "own_key_invalid" : "gate", p.kind === "own" ? "Your own AI key was rejected. Update it in Settings." : "Sign in with publik to continue.", detail);
+    if (res.status === 429) throw new AiRequestError(429, "rate_limited", "Too many requests right now. Wait a few seconds and try again.", detail);
+    if (res.status >= 500) throw new AiRequestError(503, "ai_unavailable", "The AI is having trouble right now. Please try again in a minute.", detail);
+    throw new AiRequestError(502, "ai_error", "The AI couldn't process this. Please try again.", detail);
+  }
+  if (!res.body) throw new HttpError(502, "ai_error", "The AI returned an empty answer. Please try again.");
+  const reader = res.body.getReader(), decoder = new TextDecoder();
+  let buffer = "", content = "";
+  const calls = new Map<number, ToolCall>();
+  const consume = (line: string) => {
+    if (!line.startsWith("data: ") || line === "data: [DONE]") return;
+    let data: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    try { data = JSON.parse(line.slice(6)); } catch { return; }
+    const delta = data.choices?.[0]?.delta;
+    if (typeof delta?.content === "string") { content += delta.content; onText(delta.content); }
+    for (const part of delta?.tool_calls ?? []) {
+      const index = part.index ?? 0;
+      const call = calls.get(index) ?? { id: "", type: "function" as const, function: { name: "", arguments: "" } };
+      if (part.id) call.id += part.id;
+      if (part.function?.name) call.function.name += part.function.name;
+      if (part.function?.arguments) call.function.arguments += part.function.arguments;
+      calls.set(index, call);
+    }
+  };
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n"); buffer = lines.pop() ?? "";
+    for (const line of lines) consume(line.trimEnd());
+  }
+  if (buffer) consume(buffer.trimEnd());
+  return { content, toolCalls: [...calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call) };
 }
 
 /** Pull the first JSON object out of a model reply (tolerates code fences and chatter). */

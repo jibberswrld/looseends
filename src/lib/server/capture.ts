@@ -23,7 +23,7 @@ export interface CaptureInput {
   title: string | null;
   force: boolean;
   /** Set by the inbox scan (kind "gmail"): where the email came from, so it is imported once and replies stay in its thread. */
-  gmail?: { from: string; externalId: string; threadId: string | null };
+  gmail?: { from: string; address: string | null; externalId: string; threadId: string | null };
 }
 
 /** Parse the request body: JSON {text, title?, force?} or multipart with `file` (image or PDF). */
@@ -101,19 +101,18 @@ export async function capture(ctx: Ctx, input: CaptureInput): Promise<CaptureRes
 
   const title = input.title || ex.title || input.fileName || (input.kind === "image" ? "Screenshot" : input.kind === "pdf" ? "PDF document" : "Pasted message");
   const realTasks = ex.tasks.filter((t) => !t.is_promotional);
-  const classification = ex.classification === "promotional" || (ex.tasks.length > 0 && realTasks.length === 0)
-    ? "promotional"
-    : realTasks.length > 0 ? "obligations" : "no_action";
+  const classification = realTasks.length > 0 ? "obligations"
+    : ex.classification === "promotional" || ex.tasks.length > 0 ? "promotional" : "no_action";
 
   const src = (await sql`
-    insert into sources (user_id, kind, title, content, content_hash, classification, summary, injection_detected, external_id, thread_id, sender)
+    insert into sources (user_id, kind, title, content, content_hash, classification, summary, injection_detected, external_id, thread_id, sender, sender_address)
     values (${user.id}, ${input.kind}, ${title}, ${content}, ${hash}, ${classification}, ${ex.summary}, ${ex.injection_detected},
-      ${input.gmail?.externalId ?? null}, ${input.gmail?.threadId ?? null}, ${input.gmail?.from ?? null})
+      ${input.gmail?.externalId ?? null}, ${input.gmail?.threadId ?? null}, ${input.gmail?.from ?? null}, ${input.gmail?.address ?? null})
     returning *`)[0];
 
   const open = await sql`select id, title, evidence_quote from tasks where user_id = ${user.id} and status not in ('completed', 'dismissed') and (source_id is null or source_id <> ${src.id})`;
   const inserted: Row[] = [];
-  for (const t of ex.tasks) {
+  for (const t of realTasks) {
     const loc = t.evidence_quote ? locateEvidence(content, t.evidence_quote) : null;
     const quote = loc ? content.slice(loc.start, loc.end) : t.evidence_quote || null;
     const due = decideDue(t, content, tz);

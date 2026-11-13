@@ -5,13 +5,13 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowUp,
   BellSimple,
+  Broom,
+  CalendarBlank,
   CalendarPlus,
   CaretDown,
-  ChatCircle,
   Check,
   CheckCircle,
   EnvelopeSimple,
-  ListChecks,
   MinusCircle,
   PaperPlaneTilt,
   Paperclip,
@@ -24,7 +24,9 @@ import {
 import type { Task } from "@/lib/types";
 import { Button, cx, Spinner } from "../ui";
 import { api } from "./api";
-import { Avatar, CalendarLogo, GmailLogo, senderName } from "./bits";
+import { useAgent } from "./agent";
+import { Thread } from "./agent-ui";
+import { Avatar, CalendarLogo, GmailLogo, sourceLabel } from "./bits";
 import { timeAgo } from "./dates";
 import { reportError, useStore } from "./store";
 import { DueChip } from "./task-bits";
@@ -41,38 +43,35 @@ Please confirm your appointment for Thursday by 3 p.m. and complete the intake f
 Thanks,
 Riverside Dental front desk`;
 
-/* ------------------------------ Composer ------------------------------ */
+/* ------------------------------ Composer: the agent ------------------------------ */
 
-type Mode = "add" | "ask";
-
-export function Composer({ hasTasks }: { hasTasks: boolean }) {
+export function Composer({ hasTasks, onOpenTask }: { hasTasks: boolean; onOpenTask: (id: string) => void }) {
   const w = useWork();
-  const [mode, setMode] = useState<Mode>("add");
+  const agent = useAgent();
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [drag, setDrag] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const ta = useRef<HTMLTextAreaElement>(null);
+  const talking = agent.messages.length > 0 || !!agent.notice;
 
   useEffect(() => {
     const el = ta.current;
     if (!el) return;
     el.style.height = "0px";
-    el.style.height = Math.min(240, Math.max(64, el.scrollHeight)) + "px";
-  }, [text]);
+    el.style.height = Math.min(240, Math.max(talking ? 48 : 64, el.scrollHeight)) + "px";
+  }, [text, talking]);
 
   const attach = (f: File) => {
-    if (f.type === "application/pdf" || f.type.startsWith("image/")) {
-      setFile(f);
-      setMode("add");
-    }
+    if (f.type === "application/pdf" || f.type.startsWith("image/")) setFile(f);
   };
-  const canSend = !w.running && (mode === "ask" ? text.trim().length > 1 : !!file || text.trim().length > 0);
+  // A file still goes through capture (it finds the to-dos in it); anything typed goes to the agent.
+  const canSend = file ? !w.running : !agent.busy && text.trim().length > 0;
   const send = () => {
     if (!canSend) return;
     const t = text.trim();
-    if (mode === "ask") void w.ask(t);
-    else void w.capture({ text: t, file: file ?? undefined, label: file ? `Read ${file.name}` : t.split("\n").find((l) => l.trim())!.slice(0, 80) });
+    if (file) void w.capture({ text: t, file, label: `Read ${file.name}` });
+    else void agent.send(t);
     setText("");
     setFile(null);
   };
@@ -92,12 +91,13 @@ export function Composer({ hasTasks }: { hasTasks: boolean }) {
           if (f) attach(f);
         }}
         className={cx(
-          "relative z-10 rounded-[18px] border bg-surface shadow-float transition-[border-color,box-shadow] duration-150",
-          drag ? "border-accent-text ring-4 ring-accent-soft" : "border-line-strong focus-within:border-ink/35",
+          "relative z-10 overflow-hidden rounded-[18px] border bg-surface shadow-float transition-[border-color,box-shadow] duration-150",
+          drag ? "border-accent-text ring-4 ring-accent-soft" : "border-line-strong has-[#composer:focus]:border-ink/25 has-[#composer:focus]:ring-4 has-[#composer:focus]:ring-ink/[0.04]",
         )}
       >
+        {talking ? <Thread onOpenTask={onOpenTask} /> : null}
         <label htmlFor="composer" className="sr-only">
-          {mode === "ask" ? "Ask about your list" : "Paste a message, email or note"}
+          Ask about your inbox, or tell me what to do
         </label>
         <textarea
           id="composer"
@@ -112,18 +112,19 @@ export function Composer({ hasTasks }: { hasTasks: boolean }) {
             }
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && (mode === "ask" || e.metaKey || e.ctrlKey)) {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               send();
             }
           }}
-          placeholder={mode === "ask" ? "Ask about your list. What's due this week?" : "Paste an email, a text, or a note. I'll pull out what you need to do."}
-          className="block w-full resize-none bg-transparent px-5 pt-4 text-[15.5px] leading-relaxed text-ink outline-none focus-visible:outline-none placeholder:text-muted"
+          placeholder={file ? "Add a note about this file (optional)" : talking ? "Reply, or ask for something else" : "Ask about your inbox, or tell me what to do"}
+          className="block w-full resize-none bg-transparent px-5 pt-4 text-[15.5px] leading-relaxed text-ink outline-none placeholder:text-muted"
         />
         {file ? (
           <div className="mx-4 mb-2 inline-flex items-center gap-2 rounded-lg bg-surface-2 py-1.5 pr-1.5 pl-3 text-[13px]">
             <Paperclip size={14} />
             <span className="max-w-[28ch] truncate">{file.name}</span>
+            <span className="text-muted">· finds the to-dos in it</span>
             <button aria-label="Remove file" onClick={() => setFile(null)} className="inline-flex size-6 items-center justify-center rounded-md text-muted hover:bg-surface hover:text-ink">
               <X size={13} />
             </button>
@@ -144,44 +145,19 @@ export function Composer({ hasTasks }: { hasTasks: boolean }) {
           <button onClick={() => fileRef.current?.click()} aria-label="Attach a screenshot or PDF" title="Attach a screenshot or PDF" className="inline-flex size-8 items-center justify-center rounded-full border border-line-strong text-ink-2 transition-colors duration-150 hover:bg-surface-2 hover:text-ink">
             <Paperclip size={15} />
           </button>
-          <div role="tablist" aria-label="What to do with this" className="inline-flex rounded-full border border-line-strong p-0.5">
-            {(
-              [
-                ["add", "Find to-dos", ListChecks],
-                ["ask", "Ask", ChatCircle],
-              ] as const
-            ).map(([m, label, Icon]) => (
-              <button
-                key={m}
-                role="tab"
-                aria-selected={mode === m}
-                onClick={() => {
-                  setMode(m);
-                  ta.current?.focus();
-                }}
-                className={cx(
-                  "inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors duration-150",
-                  mode === m ? "bg-ink text-accent-ink" : "text-ink-2 hover:text-ink",
-                )}
-              >
-                <Icon size={14} />
-                {label}
-              </button>
-            ))}
-          </div>
-          <span className="ml-auto hidden text-[12px] text-muted sm:inline">{mode === "ask" ? "Enter" : "⌘ Enter"}</span>
+          <span className="ml-auto hidden text-[12px] text-muted sm:inline">Shift Enter for a new line</span>
           <button
             onClick={send}
             disabled={!canSend}
-            aria-label={mode === "ask" ? "Ask" : "Find to-dos"}
+            aria-label={file ? "Find to-dos in this file" : "Send"}
             className="inline-flex size-9 items-center justify-center rounded-full bg-accent text-accent-ink transition-[background-color,transform,opacity] duration-150 hover:bg-accent-hover active:scale-[0.96] disabled:opacity-25"
           >
-            {w.running ? <Spinner /> : <ArrowUp size={17} weight="bold" />}
+            {agent.busy || (file && w.running) ? <Spinner /> : <ArrowUp size={17} weight="bold" />}
           </button>
         </div>
       </div>
       <ConnectStrip />
-      <Chips hasTasks={hasTasks} />
+      {talking ? null : <Chips hasTasks={hasTasks} />}
     </div>
   );
 }
@@ -236,21 +212,21 @@ function ConnectStrip() {
 
 function Chips({ hasTasks }: { hasTasks: boolean }) {
   const w = useWork();
-  const { open } = useStore();
-  const waiting = (open ?? []).filter((t) => t.nextStepType === "reply" && !t.isPromotional && !t.actions.some((a) => a.kind === "reply")).length;
-  const chips: { icon: ReactNode; label: string; run: () => void }[] = [];
-  if (waiting) chips.push({ icon: <PencilSimpleLine size={14} />, label: waiting === 1 ? "Draft my reply" : `Draft my ${waiting} replies`, run: () => void w.draftReplies() });
-  if (hasTasks) {
-    chips.push({ icon: <Sparkle size={14} />, label: "What should I do first?", run: () => void w.ask("What should I do first, and why?") });
-    chips.push({ icon: <CalendarPlus size={14} />, label: "What's due this week?", run: () => void w.ask("What's due this week?") });
-  } else chips.push({ icon: <Sparkle size={14} />, label: "Try a sample email", run: () => void w.capture({ text: EXAMPLE, label: "Try a sample email" }) });
+  const agent = useAgent();
+  const ask = (q: string) => () => void agent.send(q);
+  const chips: { icon: ReactNode; label: string; run: () => void }[] = [
+    { icon: <EnvelopeSimple size={14} />, label: "What needs a reply?", run: ask("What needs a reply?") },
+    { icon: <Broom size={14} />, label: "Clear out my inbox", run: ask("Clear out my inbox") },
+    { icon: <CalendarBlank size={14} />, label: "What's on my calendar this week?", run: ask("What's on my calendar this week?") },
+  ];
+  if (!hasTasks) chips.push({ icon: <Sparkle size={14} />, label: "Try a sample email", run: () => void w.capture({ text: EXAMPLE, label: "Try a sample email" }) });
   return (
     <div className="mt-4 flex flex-wrap justify-center gap-2">
       {chips.map((c) => (
         <button
           key={c.label}
           onClick={c.run}
-          disabled={!!w.running}
+          disabled={agent.busy || !!w.running}
           className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line-strong bg-surface px-3.5 text-[13px] font-medium text-ink-2 transition-[background-color,color,transform] duration-150 hover:bg-surface-2 hover:text-ink active:scale-[0.98] disabled:opacity-50"
         >
           {c.icon}
@@ -317,19 +293,6 @@ function Line({ l, onOpenTask }: { l: WorkLine; onOpenTask: (id: string) => void
         <span className="max-w-[85%] truncate rounded-2xl rounded-br-md bg-surface-2 px-3.5 py-1.5 text-[14px] text-ink">{l.text}</span>
       </div>
     );
-  if (l.kind === "answer")
-    return (
-      <div className="text-[15px] leading-relaxed text-ink">
-        {l.text}
-        {l.taskIds?.length ? (
-          <span className="mt-2 flex flex-wrap gap-1.5">
-            {l.taskIds.map((id) => (
-              <TaskRef key={id} id={id} onOpen={onOpenTask} />
-            ))}
-          </span>
-        ) : null}
-      </div>
-    );
   const icon =
     l.kind === "found" ? (
       <PlusCircle size={17} weight="fill" className="text-ok" />
@@ -364,17 +327,6 @@ function Line({ l, onOpenTask }: { l: WorkLine; onOpenTask: (id: string) => void
   );
 }
 
-function TaskRef({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
-  const { open } = useStore();
-  const t = open?.find((x) => x.id === id);
-  if (!t) return null;
-  return (
-    <button onClick={() => onOpen(id)} className="inline-flex h-7 items-center rounded-full border border-line-strong bg-surface px-3 text-[12.5px] font-medium text-ink hover:bg-surface-2">
-      {t.title}
-    </button>
-  );
-}
-
 /* ------------------------------ The list: one open at a time ------------------------------ */
 
 export function Item({ task, expanded, onToggle, onOpen }: { task: Task; expanded: boolean; onToggle: () => void; onOpen: (p: Panel) => void }) {
@@ -383,7 +335,7 @@ export function Item({ task, expanded, onToggle, onOpen }: { task: Task; expande
   const { upsert } = useStore();
   const w = useWork();
   const [drafting, setDrafting] = useState(false);
-  const who = senderName(task.source?.from) ?? (task.source ? task.source.title : "Added by you");
+  const who = sourceLabel(task.source) ?? "Added by you";
   const reply = task.actions.find((a) => a.kind === "reply");
   const draftBody = reply?.kind === "reply" ? reply.payload.body : null;
   const sent = !!reply?.receipts.some((r) => r.what === "Sent with Gmail");

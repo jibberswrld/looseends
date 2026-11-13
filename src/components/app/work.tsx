@@ -1,15 +1,15 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { AskAnswer, CaptureResult, Connections, ScanEvent, Task, Toolkit } from "@/lib/types";
-import { api, ApiFailure } from "./api";
+import type { CaptureResult, Connections, ConnectorApp, ScanEvent, Toolkit } from "@/lib/types";
+import { api, ApiFailure, streamNdjson } from "./api";
 import { senderName } from "./bits";
 import { useStore } from "./store";
 
 /** One line in the work stream: what LooseEnds is doing, as it does it. */
 export interface WorkLine {
   id: number;
-  kind: "step" | "found" | "skip" | "done" | "error" | "answer" | "you";
+  kind: "step" | "found" | "skip" | "done" | "error" | "you";
   text: string;
   sub?: string | null;
   taskIds?: string[];
@@ -20,13 +20,14 @@ interface Work {
   lines: WorkLine[];
   running: string | null; // label of the job in flight
   connections: Connections | null;
+  setConnections: (c: Connections) => void;
   linking: Toolkit | null;
   connect: (t: Toolkit) => Promise<void>;
+  /** Poll until `t` shows as connected (after its consent tab was opened). Resolves true when it did. */
+  waitForConnection: (t: Toolkit) => Promise<boolean>;
   disconnect: (t: Toolkit) => Promise<void>;
   refreshConnections: () => Promise<Connections | null>;
   scanInbox: () => Promise<void>;
-  draftReplies: () => Promise<void>;
-  ask: (q: string) => Promise<void>;
   capture: (input: { text?: string; file?: File; label: string }) => Promise<void>;
   clear: () => void;
 }
@@ -38,26 +39,24 @@ export function useWork() {
   return w;
 }
 
-const tz = () => {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  } catch {
-    return "UTC";
-  }
-};
+/** Every app to show, in display order. Falls back to the two Google apps when the server sends no list. */
+export function appsOf(c: Connections | null): ConnectorApp[] {
+  if (c?.apps?.length) return c.apps;
+  return [
+    { slug: "gmail", name: "Gmail", logo: null, connected: !!c?.gmail.connected },
+    { slug: "googlecalendar", name: "Google Calendar", logo: null, connected: !!c?.googlecalendar.connected },
+  ];
+}
+export const findApp = (c: Connections | null, slug: Toolkit) => appsOf(c).find((a) => a.slug === slug) ?? null;
 
 export function WorkProvider({ children }: { children: ReactNode }) {
-  const { upsert, upsertMany, open } = useStore();
+  const { upsertMany } = useStore();
   const [lines, setLines] = useState<WorkLine[]>([]);
   const [running, setRunning] = useState<string | null>(null);
   const [connections, setConnections] = useState<Connections | null>(null);
   const [linking, setLinking] = useState<Toolkit | null>(null);
   const seq = useRef(0);
   const busy = useRef(false);
-  const openRef = useRef(open);
-  useEffect(() => {
-    openRef.current = open;
-  }, [open]);
 
   const say = useCallback((kind: WorkLine["kind"], text: string, extra: Partial<WorkLine> = {}) => {
     setLines((l) => [...l.slice(-60), { id: ++seq.current, kind, text, ...extra }]);
@@ -95,7 +94,7 @@ export function WorkProvider({ children }: { children: ReactNode }) {
       setConnections(c);
       return c;
     } catch {
-      setConnections({ available: false, message: "Connections can't be reached right now.", gmail: { connected: false, lastScanAt: null }, googlecalendar: { connected: false } });
+      setConnections({ available: false, message: "Connections can't be reached right now.", apps: [], gmail: { connected: false, lastScanAt: null }, googlecalendar: { connected: false } });
       return null;
     }
   }, []);
@@ -104,9 +103,27 @@ export function WorkProvider({ children }: { children: ReactNode }) {
     void refreshConnections();
   }, [refreshConnections]);
 
+  const waitForConnection = useCallback(
+    async (t: Toolkit) => {
+      setLinking(t);
+      try {
+        const until = Date.now() + 5 * 60_000;
+        while (Date.now() < until) {
+          await new Promise((r) => setTimeout(r, 3000));
+          const c = await refreshConnections();
+          if (findApp(c, t)?.connected) return true;
+        }
+        return false;
+      } finally {
+        setLinking(null);
+      }
+    },
+    [refreshConnections],
+  );
+
   const connect = useCallback(
     async (t: Toolkit) => {
-      const name = t === "gmail" ? "Gmail" : "Google Calendar";
+      const name = findApp(connections, t)?.name ?? t;
       // Open the tab inside the click so browsers don't block it, then point it at the consent screen.
       const tab = window.open("about:blank", "_blank");
       try {
@@ -118,22 +135,11 @@ export function WorkProvider({ children }: { children: ReactNode }) {
         fail(e);
         return;
       }
-      setLinking(t);
       say("step", `Waiting for you to approve ${name} in the other tab`);
-      const until = Date.now() + 5 * 60_000;
-      while (Date.now() < until) {
-        await new Promise((r) => setTimeout(r, 3000));
-        const c = await refreshConnections();
-        if (c?.[t].connected) {
-          say("done", `${name} is connected`);
-          setLinking(null);
-          return;
-        }
-      }
-      setLinking(null);
-      say("error", `${name} wasn't connected. Try again when you're ready.`);
+      if (await waitForConnection(t)) say("done", `${name} is connected`);
+      else say("error", `${name} wasn't connected. Try again when you're ready.`);
     },
-    [fail, refreshConnections, say],
+    [connections, fail, say, waitForConnection],
   );
 
   const disconnect = useCallback(
@@ -150,14 +156,6 @@ export function WorkProvider({ children }: { children: ReactNode }) {
   const scanInbox = useCallback(
     () =>
       job("Checking your inbox", "Check my inbox", async () => {
-        const res = await fetch("/api/inbox/scan", { method: "POST", headers: { "x-timezone": tz() } });
-        if (!res.ok || !res.body) {
-          const b = (await res.json().catch(() => null)) as { error?: { message?: string; code?: string; topUpUrl?: string } } | null;
-          throw new ApiFailure(res.status, b?.error?.code ?? "error", b?.error?.message ?? "Couldn't check your inbox.", b?.error?.topUpUrl ?? null);
-        }
-        const reader = res.body.getReader();
-        const dec = new TextDecoder();
-        let buf = "";
         const onEvent = (ev: ScanEvent) => {
           if (ev.type === "step") say("step", ev.text);
           else if (ev.type === "email") {
@@ -173,52 +171,9 @@ export function WorkProvider({ children }: { children: ReactNode }) {
             void refreshConnections();
           } else if (ev.type === "error") say("error", ev.message, { topUpUrl: ev.topUpUrl ?? null });
         };
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += dec.decode(value, { stream: true });
-          let nl: number;
-          while ((nl = buf.indexOf("\n")) >= 0) {
-            const line = buf.slice(0, nl).trim();
-            buf = buf.slice(nl + 1);
-            if (line) onEvent(JSON.parse(line) as ScanEvent);
-          }
-        }
-        if (buf.trim()) onEvent(JSON.parse(buf) as ScanEvent);
+        await streamNdjson<ScanEvent>("/api/inbox/scan", {}, onEvent, "Couldn't check your inbox.");
       }),
     [job, say, upsertMany, refreshConnections],
-  );
-
-  const draftReplies = useCallback(
-    () =>
-      job("Drafting replies", "Draft my replies", async () => {
-        const todo = (openRef.current ?? []).filter(
-          (t) => t.nextStepType === "reply" && !t.isPromotional && !t.actions.some((a) => a.kind === "reply"),
-        );
-        if (!todo.length) {
-          say("done", "No replies are waiting for a draft.");
-          return;
-        }
-        say("step", `Writing ${todo.length} ${todo.length === 1 ? "reply" : "replies"}`);
-        let n = 0;
-        for (const t of todo.slice(0, 8)) {
-          const r = await api<{ task: Task }>(`/api/tasks/${t.id}/draft`, { method: "POST", json: {} });
-          upsert(r.task);
-          n++;
-          say("found", `Draft ready: ${t.title}`, { sub: t.source?.title ?? null, taskIds: [t.id] });
-        }
-        say("done", `${n} ${n === 1 ? "draft is" : "drafts are"} ready for you to review. Nothing was sent.`);
-      }),
-    [job, say, upsert],
-  );
-
-  const ask = useCallback(
-    (q: string) =>
-      job("Thinking", q, async () => {
-        const a = await api<AskAnswer>("/api/ask", { method: "POST", json: { question: q } });
-        say("answer", a.answer, { taskIds: a.taskIds });
-      }),
-    [job, say],
   );
 
   const capture = useCallback(
@@ -247,8 +202,8 @@ export function WorkProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<Work>(
-    () => ({ lines, running, connections, linking, connect, disconnect, refreshConnections, scanInbox, draftReplies, ask, capture, clear: () => setLines([]) }),
-    [lines, running, connections, linking, connect, disconnect, refreshConnections, scanInbox, draftReplies, ask, capture],
+    () => ({ lines, running, connections, setConnections, linking, connect, waitForConnection, disconnect, refreshConnections, scanInbox, capture, clear: () => setLines([]) }),
+    [lines, running, connections, linking, connect, waitForConnection, disconnect, refreshConnections, scanInbox, capture],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

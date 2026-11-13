@@ -47,3 +47,21 @@ export function Avatar({ name, size = 32, className }: { name: string | null; si
     </span>
   );
 }
+
+/** A connected app's logo: Composio's image when there is one, else our Google marks, else its initial. */
+export function AppLogo({ slug, name, logo, size = 16, className }: { slug: string; name: string; logo: string | null; size?: number; className?: string }) {
+  if (logo)
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- remote logos from Composio; next/image would need remotePatterns for every host
+      <img src={logo} alt="" width={size} height={size} loading="lazy" className={cx("shrink-0 object-contain", className)} style={{ width: size, height: size }} />
+    );
+  if (slug === "gmail") return <GmailLogo size={size} className={className} />;
+  if (slug === "googlecalendar") return <CalendarLogo size={size} className={className} />;
+  return <Avatar name={name} size={size} className={cx("rounded-[4px]", className)} />;
+}
+
+/** Who a task came from, by name: the sender, else the source title without "Email from". */
+export function sourceLabel(source: { from: string | null; title: string } | null | undefined): string | null {
+  if (!source) return null;
+  return senderName(source.from) ?? (source.title.replace(/^(an? )?(e-?mail|message|text|letter|note|notice) from\s+/i, "").trim() || source.title);
+}

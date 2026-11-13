@@ -52,3 +52,37 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
   }
   return body as T;
 }
+
+/** POST to a route that answers with NDJSON, calling `onEvent` for each line as it arrives. Throws ApiFailure on a non-2xx. */
+export async function streamNdjson<E>(path: string, json: unknown, onEvent: (e: E) => void, fallback = "Something went wrong. Try again."): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-timezone": timezone() },
+      body: JSON.stringify(json ?? {}),
+      cache: "no-store",
+    });
+  } catch {
+    throw new ApiFailure(0, "network", "You're offline or LooseEnds can't be reached. Check your connection and try again.");
+  }
+  if (!res.ok || !res.body) {
+    const b = (await res.json().catch(() => null)) as Partial<ApiError> | null;
+    throw new ApiFailure(res.status, b?.error?.code ?? "error", b?.error?.message ?? fallback, b?.error?.topUpUrl ?? null);
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (line) onEvent(JSON.parse(line) as E);
+    }
+  }
+  if (buf.trim()) onEvent(JSON.parse(buf) as E);
+}

@@ -1,7 +1,7 @@
 // Local stand-in for the LooseEnds connector service (src/app/api/connector/**), for end-to-end tests without
 // Composio or a real Google account. Run: node scripts/mock-connector.mjs
 // Then start the app with CONNECTOR_ORIGIN=http://localhost:4666.
-// Same four routes as the real service (POST link, GET status, POST disconnect, POST run), state in memory.
+// Same connector routes as the real service, state in memory.
 // Extras: GET /mock-connect/<toolkit>?user=<id> ("signs in with Google"), GET /mock/calls (every write it was asked
 // to do), GET /mock/fail/on|off (make the next runs fail), GET /mock/reset. Never used in production.
 import { createServer } from "node:http";
@@ -11,13 +11,24 @@ const PORT = Number(process.env.MOCK_CONNECTOR_PORT || 4666);
 const ORIGIN = `http://localhost:${PORT}`;
 const SEND_DELAY_MS = Number(process.env.MOCK_SEND_DELAY_MS ?? 400); // long enough for two racing sends to overlap
 
-const ALLOWED = {
-  GMAIL_FETCH_EMAILS: "gmail",
-  GMAIL_CREATE_EMAIL_DRAFT: "gmail",
-  GMAIL_REPLY_TO_THREAD: "gmail",
-  GMAIL_SEND_EMAIL: "gmail",
-  GOOGLECALENDAR_CREATE_EVENT: "googlecalendar",
-};
+const APPS = [
+  ["gmail", "Gmail"], ["googlecalendar", "Google Calendar"], ["outlook", "Outlook"], ["slack", "Slack"],
+  ["notion", "Notion"], ["googledrive", "Google Drive"], ["googledocs", "Google Docs"],
+  ["googlesheets", "Google Sheets"], ["github", "GitHub"], ["linear", "Linear"], ["todoist", "Todoist"],
+];
+const TOOLS = [
+  ["GMAIL_FETCH_EMAILS", "gmail", "Fetch emails", true, { query: { type: "string" }, max_results: { type: "integer" } }],
+  ["GMAIL_CREATE_EMAIL_DRAFT", "gmail", "Create email draft", false, { recipient_email: { type: "string" }, subject: { type: "string" }, body: { type: "string" } }],
+  ["GMAIL_REPLY_TO_THREAD", "gmail", "Reply to thread", false, { thread_id: { type: "string" }, message_body: { type: "string" } }],
+  ["GMAIL_SEND_EMAIL", "gmail", "Send email", false, { recipient_email: { type: "string" }, subject: { type: "string" }, body: { type: "string" } }],
+  ["GOOGLECALENDAR_CREATE_EVENT", "googlecalendar", "Create event", false, { summary: { type: "string" }, start_datetime: { type: "string" } }],
+  ["GOOGLECALENDAR_LIST_EVENTS", "googlecalendar", "List events", true, {}],
+  ["SLACK_SLACK_SEARCH_ALL", "slack", "Search Slack", true, { query: { type: "string" } }],
+  ["SLACK_CHAT_POST_MESSAGE", "slack", "Post Slack message", false, { channel: { type: "string" }, text: { type: "string" } }],
+  ["NOTION_SEARCH", "notion", "Search Notion", true, { query: { type: "string" } }],
+  ["TODOIST_CREATE_TASK", "todoist", "Create Todoist task", false, { content: { type: "string" } }],
+];
+const metadata = ([slug, toolkit, name, readOnly, properties]) => ({ slug, toolkit, name, description: name, readOnly, parameters: { type: "object", properties } });
 
 const connected = new Map(); // user -> Set<toolkit>
 let calls = []; // { tool, user, arguments, at, id }
@@ -98,6 +109,9 @@ function run(tool, args, user) {
     record(id);
     return { id, threadId: args.thread_id || id, labelIds: ["SENT"], display_url: `https://mail.google.com/mail/u/0/#sent/${id}` };
   }
+  if (tool !== "GOOGLECALENDAR_CREATE_EVENT") {
+    const id = hex(8); record(id); return { id, ok: true };
+  }
   // GOOGLECALENDAR_CREATE_EVENT
   const id = hex(13);
   record(id);
@@ -121,7 +135,7 @@ createServer(async (req, res) => {
     if (req.method === "GET" && path.startsWith("/mock-connect/")) {
       const toolkit = path.slice("/mock-connect/".length);
       const user = url.searchParams.get("user");
-      if (!user || !["gmail", "googlecalendar"].includes(toolkit)) { res.writeHead(404); return res.end("unknown connect link"); }
+      if (!user || !APPS.some(([slug]) => slug === toolkit)) { res.writeHead(404); return res.end("unknown connect link"); }
       toolkitsOf(user).add(toolkit);
       console.log(`[mock-connector] ${user} connected ${toolkit}`);
       res.writeHead(200, { "content-type": "text/html" });
@@ -138,25 +152,31 @@ createServer(async (req, res) => {
     const mine = toolkitsOf(user);
 
     if (req.method === "GET" && path === "/api/connector/status") {
-      return send(res, 200, { gmail: mine.has("gmail"), googlecalendar: mine.has("googlecalendar") });
+      return send(res, 200, { ...Object.fromEntries(APPS.map(([slug]) => [slug, mine.has(slug)])), apps: APPS.map(([slug, name]) => ({ slug, name, logo: `https://logos.composio.dev/api/${slug}`, connected: mine.has(slug) })) });
     }
     if (req.method !== "POST") return error(res, 404, "not_found", "not found");
     const body = await readBody(req);
 
     if (path === "/api/connector/link" || path === "/api/connector/disconnect") {
-      if (!["gmail", "googlecalendar"].includes(body.toolkit)) return error(res, 400, "invalid_request", "toolkit must be gmail or googlecalendar.");
+      if (!APPS.some(([slug]) => slug === body.toolkit)) return error(res, 400, "invalid_request", "Unsupported app.");
       if (path.endsWith("/link")) return send(res, 200, { url: `${ORIGIN}/mock-connect/${body.toolkit}?user=${user}` });
       mine.delete(body.toolkit);
       return send(res, 200, { ok: true });
     }
+    if (path === "/api/connector/tools") {
+      const query = String(body.query ?? "").toLowerCase();
+      const wanted = Array.isArray(body.toolkits) ? body.toolkits : [...mine];
+      const words = query.split(/\s+/).filter((w) => w.length > 2);
+      return send(res, 200, { tools: TOOLS.filter(([slug, toolkit, name]) => mine.has(toolkit) && wanted.includes(toolkit) && words.some((w) => `${slug} ${name} ${toolkit}`.toLowerCase().includes(w))).slice(0, 8).map(metadata) });
+    }
     if (path === "/api/connector/run") {
-      const toolkit = Object.hasOwn(ALLOWED, body.tool) ? ALLOWED[body.tool] : null;
+      const toolkit = TOOLS.find(([slug]) => slug === body.tool)?.[1];
       if (!toolkit) return error(res, 403, "tool_not_allowed", "LooseEnds can't do that.");
       if (!mine.has(toolkit)) return error(res, 409, "not_connected", toolkit === "gmail" ? "Connect Gmail first." : "Connect Google Calendar first.");
       if (body.tool !== "GMAIL_FETCH_EMAILS") await sleep(SEND_DELAY_MS);
       if (failing) return error(res, 502, "tool_failed", "Google couldn't complete that. Please try again.");
       console.log(`[mock-connector] run ${body.tool}`);
-      return send(res, 200, { data: run(body.tool, body.arguments ?? {}, user) });
+      return send(res, 200, { data: TOOLS.find(([slug]) => slug === body.tool)?.[3] && body.tool !== "GMAIL_FETCH_EMAILS" ? { items: [] } : run(body.tool, body.arguments ?? {}, user) });
     }
     error(res, 404, "not_found", "not found");
   } catch (e) {

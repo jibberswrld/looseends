@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowCounterClockwise, CheckCircle, Prohibit, SealCheck } from "@phosphor-icons/react";
 import type { Task } from "@/lib/types";
+import { sourceLabel } from "@/components/app/bits";
 import { Page, PageHeader } from "@/components/app/page-header";
 import { useStore } from "@/components/app/store";
 import { TaskSheet } from "@/components/app/task-sheet";
@@ -99,7 +100,7 @@ export default function HistoryPage() {
                         <p className="truncate text-[12.5px] text-muted">
                           {t.status === "completed" ? "Done" : t.status === "approved" ? "Approved" : "Dismissed"}
                           {receipts.length ? ` · ${receipts[receipts.length - 1].what}` : ""}
-                          {t.source ? ` · ${t.source.title}` : ""}
+                          {t.source ? ` · ${sourceLabel(t.source)}` : ""}
                         </p>
                       </button>
                       {t.status !== "approved" ? (

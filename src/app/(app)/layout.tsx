@@ -1,6 +1,7 @@
 "use client";
 
 import { Toaster } from "sonner";
+import { AgentProvider } from "@/components/app/agent";
 import { Gate } from "@/components/app/gate";
 import { Shell } from "@/components/app/shell";
 import { StoreProvider } from "@/components/app/store";
@@ -12,7 +13,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <Gate>
         <StoreProvider>
           <WorkProvider>
-            <Shell>{children}</Shell>
+            <AgentProvider>
+              <Shell>{children}</Shell>
+            </AgentProvider>
           </WorkProvider>
         </StoreProvider>
       </Gate>

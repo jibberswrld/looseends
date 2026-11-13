@@ -157,17 +157,71 @@ export interface ApiError {
   error: { code: string; message: string; topUpUrl?: string | null };
 }
 
-// ---- Connected accounts (Gmail / Google Calendar through Composio, via the LooseEnds connector service) ----
-export type Toolkit = "gmail" | "googlecalendar";
+// ---- Connected apps (through Composio, via the hosted LooseEnds connector service) ----
+/** A Composio toolkit slug: "gmail", "googlecalendar", "slack", "notion", ... */
+export type Toolkit = string;
+export interface ConnectorApp {
+  slug: Toolkit;
+  name: string; // "Gmail", "Google Calendar", "Slack"
+  logo: string | null; // image URL from Composio toolkit metadata
+  connected: boolean;
+}
 export interface Connections {
   available: boolean; // false when the connector service is not configured or unreachable
   message: string | null; // why it is unavailable, in plain words
+  apps: ConnectorApp[]; // every app LooseEnds supports, in display order (gmail, googlecalendar first)
   gmail: { connected: boolean; lastScanAt: string | null };
   googlecalendar: { connected: boolean };
 }
 // GET  /api/connections                      -> Connections
 // POST /api/connections/link {toolkit}       -> { url }   (open in a new tab; then poll GET /api/connections)
 // POST /api/connections/disconnect {toolkit} -> Connections
+
+// ---- The agent: one conversation per user, about their inbox, tasks and connected apps ----
+// Reads (search mail, list events, look up a Notion page...) run straight away.
+// Anything that changes something outside LooseEnds (send an email, post to Slack, create an event...) becomes an
+// AgentAction with status "pending" and runs only after the user approves it.
+export type AgentActionStatus = "pending" | "running" | "done" | "failed" | "cancelled";
+export interface AgentAction {
+  id: string;
+  app: Toolkit; // "gmail"
+  tool: string; // Composio tool slug, "GMAIL_SEND_EMAIL"
+  title: string; // short imperative label: "Send email to Dr. Patel"
+  summary: string; // what will happen, in plain words, incl. the key content (recipient, subject, body / message text)
+  args: Record<string, unknown>; // the exact arguments that will run; the UI may let the user edit text fields
+  status: AgentActionStatus;
+  result: string | null; // plain-language outcome after it ran ("Sent", "Event created for Fri 3 PM")
+  error: string | null;
+}
+export interface AgentToolStep {
+  id: string;
+  label: string; // "Searching Gmail for 'invoice'", "Reading 3 emails", "Looking up your calendar"
+  status: "running" | "done" | "failed";
+}
+export interface AgentMessage {
+  id: string;
+  role: "user" | "assistant";
+  text: string; // markdown-lite: paragraphs, "- " bullets, **bold**; no headings or tables
+  steps: AgentToolStep[]; // what the agent did while answering (assistant only)
+  actions: AgentAction[]; // actions it proposed (assistant only)
+  taskIds: string[]; // tasks it created or referred to (assistant only)
+  createdAt: string;
+}
+// GET    /api/agent                       -> { messages: AgentMessage[] }   (oldest first, last 100)
+// DELETE /api/agent                       -> { messages: [] }               (start over)
+// POST   /api/agent {message}             -> NDJSON stream of AgentEvent (content-type application/x-ndjson)
+// POST   /api/agent/actions/:id {decision: "approve" | "cancel", args?}  -> NDJSON stream of AgentEvent
+//   approve: runs the action (with edited args if given), then the agent writes a one-line follow-up.
+//   cancel: marks it cancelled; no follow-up model call.
+export type AgentEvent =
+  | { type: "message"; message: AgentMessage } // the user message as stored, or an assistant message as created
+  | { type: "text"; messageId: string; delta: string } // streamed assistant text
+  | { type: "step"; messageId: string; step: AgentToolStep } // a tool step started or finished (same id = update)
+  | { type: "action"; messageId: string; action: AgentAction } // a proposed action, or an action's new status
+  | { type: "tasks"; tasks: Task[] } // tasks the agent created or changed; the UI merges them into its list
+  | { type: "connections"; connections: Connections } // the agent connected/linked something; refresh the sidebar
+  | { type: "done"; messageId: string }
+  | { type: "error"; code: string; message: string; topUpUrl?: string | null };
 
 // POST /api/inbox/scan  -> NDJSON stream (content-type application/x-ndjson), one ScanEvent per line.
 export type ScanEvent =

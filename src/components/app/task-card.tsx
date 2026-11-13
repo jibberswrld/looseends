@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import type { Task } from "@/lib/types";
 import { Button, Chip, cx } from "../ui";
 import { api } from "./api";
+import { sourceLabel } from "./bits";
 import { snoozePresets, timeAgo } from "./dates";
 import { reportError, useStore } from "./store";
 import { DueChip, primaryActionLabel, statusLabel } from "./task-bits";
@@ -151,7 +152,7 @@ export function TaskCard({ task, onOpen }: { task: Task; onOpen: (panel: Panel) 
             {task.source ? (
               <button onClick={() => onOpen("source")} className="inline-flex max-w-[26ch] items-center gap-1.5 truncate hover:text-ink sm:max-w-[40ch]">
                 {task.source.kind === "gmail" ? <EnvelopeSimple size={13} className="shrink-0 text-accent-text" /> : null}
-                <span className="truncate">{task.source.from ?? task.source.title}</span>
+                <span className="truncate">{sourceLabel(task.source)}</span>
               </button>
             ) : (
               <span>Added by you</span>

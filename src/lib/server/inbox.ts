@@ -6,7 +6,7 @@ import { HttpError } from "./http";
 import type { Ctx } from "./session";
 import { track } from "./track";
 
-const QUERY = "in:inbox newer_than:7d -category:promotions -category:social";
+const QUERY = "in:inbox newer_than:7d -category:promotions -category:social -category:forums";
 const MAX_EMAILS = 15;
 const BODY_LIMIT = 8_000;
 
@@ -53,7 +53,9 @@ export async function* scanInbox(ctx: Ctx): AsyncGenerator<ScanEvent> {
     let scanned = 0, found = 0, skipped = 0;
     for (const m of emails) {
       const id = str(m.messageId);
-      const from = str(m.sender) || "Unknown sender";
+      const rawSender = str(m.sender) || "Unknown sender";
+      const from = rawSender.replace(/\s*<[^>]+>\s*$/, "").replace(/^"|"$/g, "").trim() || rawSender;
+      const address = /<([^<>\s]+@[^<>\s]+)>/.exec(rawSender)?.[1] ?? (/^[^\s<>]+@[^\s<>]+$/.test(rawSender) ? rawSender : null);
       const subject = str(m.subject) || "(no subject)";
       const seen = await sql`select 1 from sources where user_id = ${user.id} and external_id = ${id} limit 1`;
       if (seen[0]) {
@@ -68,8 +70,8 @@ export async function* scanInbox(ctx: Ctx): AsyncGenerator<ScanEvent> {
       const text = `From: ${from}\nSubject: ${subject}\n${date ? `Date: ${date}\n` : ""}\n${body}`;
       try {
         const result = await capture(ctx, {
-          kind: "gmail", text, fileName: null, title: subject.slice(0, 80), force: false,
-          gmail: { from, externalId: id, threadId: str(m.threadId) || null },
+          kind: "gmail", text, fileName: null, title: from.slice(0, 80), force: false,
+          gmail: { from, address, externalId: id, threadId: str(m.threadId) || null },
         });
         if (result.outcome === "duplicate_source") {
           skipped++;

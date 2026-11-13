@@ -18,7 +18,7 @@ const noRecipient = () => new HttpError(400, "no_recipient", "Add the recipient'
 /** The Gmail thread this task's reply belongs to, when its source came from the inbox scan. */
 async function gmailSource(action: Row): Promise<Row | null> {
   const rows = await sql`
-    select s.thread_id, s.sender from sources s join tasks t on t.source_id = s.id
+    select s.thread_id, s.sender_address, s.sender from sources s join tasks t on t.source_id = s.id
     where t.id = ${action.task_id} and s.kind = 'gmail' and s.thread_id is not null`;
   return rows[0] ?? null;
 }
@@ -27,7 +27,7 @@ async function replyCall(action: Row, taskTitle: string): Promise<{ tool: string
   const p = action.payload as ReplyPayload;
   const src = await gmailSource(action);
   if (src) {
-    const to = emailAddress(p.to) ?? emailAddress(src.sender);
+    const to = emailAddress(p.to) ?? emailAddress(src.sender_address) ?? emailAddress(src.sender);
     if (!to) throw noRecipient();
     // No subject: Gmail keeps the thread's own.
     return { tool: "GMAIL_REPLY_TO_THREAD", args: { thread_id: src.thread_id, recipient_email: to, message_body: p.body, is_html: false } };
@@ -106,7 +106,7 @@ export async function saveGmailDraft(action: Row): Promise<void> {
   if (action.kind !== "reply") throw new HttpError(400, "not_reply", "Only replies can be saved as Gmail drafts.");
   const p = action.payload as ReplyPayload;
   const src = await gmailSource(action);
-  const to = emailAddress(p.to) ?? emailAddress(src?.sender);
+  const to = emailAddress(p.to) ?? emailAddress(src?.sender_address) ?? emailAddress(src?.sender);
   const r = await connectorRun("GMAIL_CREATE_EMAIL_DRAFT", {
     body: p.body, is_html: false,
     ...(to ? { recipient_email: to } : {}),
