@@ -20,7 +20,7 @@ const SECTIONS: [string, string[]][] = [
     [
       "To find tasks and write drafts, your content is sent to the AI model behind your chosen plan: publik API, or the provider of your own key. publik does not train on requests.",
       "Message content is treated as data. Instructions inside a message can't make LooseEnds do anything.",
-      "LooseEnds is not connected to your email or calendar and can't send, book, pay or delete anything outside the app.",
+      "Gmail and Google Calendar are optional. If you connect them (through Composio), LooseEnds reads recent inbox mail when you ask it to check, and sends a reply or adds an event only after you confirm that exact preview. You can disconnect in Settings.",
     ],
   ],
   [

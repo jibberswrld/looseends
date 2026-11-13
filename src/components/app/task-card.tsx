@@ -82,6 +82,9 @@ export function TaskCard({ task, onOpen }: { task: Task; onOpen: (panel: Panel) 
   const PrimaryIcon = primary.panel === "reply" ? EnvelopeSimple : primary.panel === "event" ? CalendarPlus : BellSimple;
   const dupTitle = cmd.duplicateTitle(task);
   const lowConfidence = task.confidence < 0.5 && task.status === "detected";
+  const reply = task.actions.find((a) => a.kind === "reply");
+  const draftBody = reply?.kind === "reply" ? reply.payload.body.replace(/\n{2,}/g, "\n") : null;
+  const sent = !!reply?.receipts.some((r) => r.what === "Sent with Gmail");
 
   return (
     <motion.li
@@ -90,7 +93,7 @@ export function TaskCard({ task, onOpen }: { task: Task; onOpen: (panel: Panel) 
       animate={{ opacity: 1, y: 0 }}
       exit={reduce ? { opacity: 0 } : { opacity: 0, x: 24, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 380, damping: 34 }}
-      className="group relative list-none rounded-2xl border border-line bg-surface shadow-card"
+      className="group relative list-none rounded-xl border border-line bg-surface shadow-card"
     >
       <div className="flex gap-3 p-4 sm:gap-4 sm:p-5">
         <button
@@ -120,8 +123,17 @@ export function TaskCard({ task, onOpen }: { task: Task; onOpen: (panel: Panel) 
             </button>
           ) : null}
 
+          {draftBody ? (
+            <button onClick={() => onOpen("reply")} className="mt-3 block w-full rounded-lg border border-line bg-surface-2/60 px-3.5 py-2.5 text-left transition-colors duration-150 hover:border-line-strong">
+              <span className="flex items-center gap-1.5 text-[11.5px] font-medium text-accent-text">
+                <EnvelopeSimple size={13} weight="fill" /> {sent ? "Sent with Gmail" : "Draft ready · not sent"}
+              </span>
+              <span className="mt-1 line-clamp-2 block whitespace-pre-line text-[13.5px] leading-relaxed text-ink-2">{draftBody}</span>
+            </button>
+          ) : null}
+
           {dupTitle ? (
-            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-surface-2 px-3 py-2 text-[13px] text-ink-2">
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 text-[13px] text-ink-2">
               <GitMerge size={15} className="text-accent" />
               <span className="min-w-0 flex-1">
                 Looks like <span className="font-medium text-ink">{dupTitle}</span>, already on your list.
@@ -137,8 +149,9 @@ export function TaskCard({ task, onOpen }: { task: Task; onOpen: (panel: Panel) 
 
           <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted">
             {task.source ? (
-              <button onClick={() => onOpen("source")} className="max-w-[24ch] truncate hover:text-ink sm:max-w-[36ch]">
-                {task.source.title}
+              <button onClick={() => onOpen("source")} className="inline-flex max-w-[26ch] items-center gap-1.5 truncate hover:text-ink sm:max-w-[40ch]">
+                {task.source.kind === "gmail" ? <EnvelopeSimple size={13} className="shrink-0 text-accent-text" /> : null}
+                <span className="truncate">{task.source.from ?? task.source.title}</span>
               </button>
             ) : (
               <span>Added by you</span>
@@ -185,7 +198,7 @@ export function TaskMenu({ task, onOpen }: { task: Task; onOpen: (p: Panel) => v
       <Menu.Trigger asChild>
         <button
           aria-label="More actions"
-          className="inline-flex size-8 items-center justify-center rounded-xl text-muted transition-colors hover:bg-surface-2 hover:text-ink data-[state=open]:bg-surface-2"
+          className="inline-flex size-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-ink data-[state=open]:bg-surface-2"
         >
           <DotsThree size={20} weight="bold" />
         </button>
@@ -194,7 +207,7 @@ export function TaskMenu({ task, onOpen }: { task: Task; onOpen: (p: Panel) => v
         <Menu.Content
           align="end"
           sideOffset={6}
-          className="z-50 min-w-[210px] rounded-xl border border-line bg-surface p-1 shadow-float"
+          className="z-50 min-w-[210px] rounded-lg border border-line bg-surface p-1 shadow-float"
         >
           <Menu.Item className={itemCls} onSelect={() => onOpen("details")}>
             <PencilSimple size={16} /> Edit details
@@ -218,7 +231,7 @@ export function TaskMenu({ task, onOpen }: { task: Task; onOpen: (p: Panel) => v
               <Moon size={16} /> Snooze
             </Menu.SubTrigger>
             <Menu.Portal>
-              <Menu.SubContent sideOffset={6} className="z-50 min-w-[180px] rounded-xl border border-line bg-surface p-1 shadow-float">
+              <Menu.SubContent sideOffset={6} className="z-50 min-w-[180px] rounded-lg border border-line bg-surface p-1 shadow-float">
                 {snoozePresets().map((p) => (
                   <Menu.Item key={p.label} className={itemCls} onSelect={() => void cmd.snooze(task, p.at)}>
                     {p.label}

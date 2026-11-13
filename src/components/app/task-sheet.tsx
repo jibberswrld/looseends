@@ -27,6 +27,7 @@ import { formatDue, fromLocalInput, toLocalDateInput, toLocalInput, timeAgo } fr
 import { reportError, useStore } from "./store";
 import { DueChip, STATUS_FLOW } from "./task-bits";
 import { useTaskCommands, type Panel } from "./task-card";
+import { useWork } from "./work";
 
 const TABS: { id: Panel; label: string }[] = [
   { id: "details", label: "Details" },
@@ -64,7 +65,7 @@ export function TaskSheet({
             </Dialog.Overlay>
             <Dialog.Content asChild forceMount aria-describedby={undefined}>
               <motion.div
-                className="fixed inset-x-0 bottom-0 z-50 flex max-h-[92dvh] flex-col rounded-t-2xl border border-line bg-bg shadow-float outline-none sm:inset-y-2 sm:right-2 sm:left-auto sm:max-h-none sm:w-[min(560px,calc(100vw-1rem))] sm:rounded-2xl"
+                className="fixed inset-x-0 bottom-0 z-50 flex max-h-[92dvh] flex-col rounded-t-2xl border border-line bg-bg shadow-float outline-none sm:inset-y-2 sm:right-2 sm:left-auto sm:max-h-none sm:w-[min(560px,calc(100vw-1rem))] sm:rounded-xl"
                 initial={reduce ? { opacity: 0 } : { opacity: 0, x: 0, y: 40 }}
                 animate={{ opacity: 1, x: 0, y: 0 }}
                 exit={reduce ? { opacity: 0 } : { opacity: 0, y: 30, transition: { duration: 0.18 } }}
@@ -94,7 +95,7 @@ function SheetBody({ task, panel, onPanel, onClose }: { task: Task; panel: Panel
           </div>
         </div>
         <Dialog.Close asChild>
-          <button aria-label="Close" className="inline-flex size-9 items-center justify-center rounded-xl text-muted hover:bg-surface-2 hover:text-ink">
+          <button aria-label="Close" className="inline-flex size-9 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-ink">
             <X size={18} />
           </button>
         </Dialog.Close>
@@ -220,7 +221,7 @@ function DetailsPanel({ task }: { task: Task }) {
   return (
     <div className="space-y-5">
       {task.dueStatus === "needs_review" || task.dueStatus === "unclear" ? (
-        <div className="rounded-xl bg-warn-soft px-4 py-3 text-[13.5px] leading-relaxed text-ink-2">
+        <div className="rounded-lg bg-warn-soft px-4 py-3 text-[13.5px] leading-relaxed text-ink-2">
           <p className="flex items-center gap-2 font-medium text-warn">
             <Info size={16} weight="bold" />
             {task.dueStatus === "needs_review" ? "Please confirm this date" : "The message doesn't give an exact date"}
@@ -306,7 +307,7 @@ function DetailsPanel({ task }: { task: Task }) {
       {task.evidence?.quote ? (
         <div className="space-y-1.5">
           <p className="text-[13px] font-medium text-ink-2">Why LooseEnds found this</p>
-          <blockquote className="rounded-xl border-l-2 border-accent/60 bg-surface px-4 py-3 text-[13.5px] leading-relaxed text-ink-2">
+          <blockquote className="rounded-lg border-l-2 border-accent/60 bg-surface px-4 py-3 text-[13.5px] leading-relaxed text-ink-2">
             “{task.evidence.quote}”
           </blockquote>
         </div>
@@ -322,7 +323,7 @@ function DetailsPanel({ task }: { task: Task }) {
 
 function NotSentBanner({ children }: { children: React.ReactNode }) {
   return (
-    <p className="flex items-start gap-2 rounded-xl bg-surface-2 px-3.5 py-2.5 text-[13px] leading-relaxed text-ink-2">
+    <p className="flex items-start gap-2 rounded-lg bg-surface-2 px-3.5 py-2.5 text-[13px] leading-relaxed text-ink-2">
       <Info size={16} className="mt-0.5 shrink-0 text-accent" />
       <span>{children}</span>
     </p>
@@ -361,11 +362,46 @@ function useActionCalls(task: Task) {
   return { call, receipt, taskId: task.id };
 }
 
+/** An outbound action. Always a two-step press: the preview above is what goes out. */
+export function ConfirmSend({ label, confirmLabel, detail, onSend, disabled }: { label: string; confirmLabel: string; detail: string; onSend: () => Promise<unknown>; disabled?: boolean }) {
+  const [armed, setArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  if (!armed)
+    return (
+      <Button variant="primary" onClick={() => setArmed(true)} disabled={disabled}>
+        <PaperPlaneTilt size={16} weight="fill" /> {label}
+      </Button>
+    );
+  return (
+    <div className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-accent-text/40 bg-accent-soft px-3 py-2.5">
+      <span className="min-w-0 flex-1 text-[13px] text-ink">{detail}</span>
+      <Button size="sm" variant="ghost" onClick={() => setArmed(false)} disabled={busy}>
+        Cancel
+      </Button>
+      <Button
+        size="sm"
+        variant="primary"
+        loading={busy}
+        onClick={async () => {
+          setBusy(true);
+          await onSend();
+          setBusy(false);
+          setArmed(false);
+        }}
+      >
+        {confirmLabel}
+      </Button>
+    </div>
+  );
+}
+
 const REVISIONS = ["Shorter", "More formal", "Friendlier", "Ask to reschedule"];
 
 function ReplyPanel({ task }: { task: Task }) {
   const action = task.actions.find((a) => a.kind === "reply") as Extract<Action, { kind: "reply" }> | undefined;
   const { call, receipt } = useActionCalls(task);
+  const { connections, connect } = useWork();
+  const gmail = !!connections?.gmail.connected;
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<ReplyPayload | null>(action?.payload ?? null);
   const [shown, setShown] = useState(action?.payload);
@@ -420,15 +456,15 @@ function ReplyPanel({ task }: { task: Task }) {
     if (edited) await save();
     const to = draft.to && /@/.test(draft.to) ? draft.to : "";
     const url = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(draft.subject ?? "")}&body=${encodeURIComponent(draft.body)}`;
-    window.location.href = url;
+    window.location.assign(url);
     await receipt(action, "Opened in your mail app");
   };
 
   return (
     <div className="space-y-4">
-      <NotSentBanner>Not sent. LooseEnds never sends messages for you. Copy it or open it in your mail app to send it yourself.</NotSentBanner>
+      <NotSentBanner>Not sent yet. Nothing goes out until you press send and confirm.</NotSentBanner>
       {draft && /\[[^\]]+\]/.test(draft.body) ? (
-        <p className="flex items-start gap-2 rounded-xl bg-warn-soft px-3.5 py-2.5 text-[13px] leading-relaxed text-ink-2">
+        <p className="flex items-start gap-2 rounded-lg bg-warn-soft px-3.5 py-2.5 text-[13px] leading-relaxed text-ink-2">
           <Info size={16} className="mt-0.5 shrink-0 text-warn" />
           Fill in the parts in [brackets] before you send it. Only you know those.
         </p>
@@ -451,8 +487,44 @@ function ReplyPanel({ task }: { task: Task }) {
           </div>
         </div>
       ) : null}
+      {action && draft ? (
+        action.receipts.some((r) => r.what === "Sent with Gmail") ? (
+          <p className="flex items-center gap-2 rounded-lg bg-accent-soft px-3.5 py-2.5 text-[13.5px] font-medium text-accent-text">
+            <Check size={15} weight="bold" /> Sent with Gmail
+          </p>
+        ) : gmail ? (
+          <div className="flex flex-wrap gap-2">
+            <ConfirmSend
+              label="Send with Gmail"
+              confirmLabel="Send now"
+              detail={`Send this reply${draft.to ? ` to ${draft.to}` : ""} from your Gmail?`}
+              disabled={busy}
+              onSend={async () => {
+                if (edited) await save();
+                const t = await call(`/api/actions/${action.id}/send`, { confirm: true });
+                if (t) toast.success("Sent with Gmail");
+              }}
+            />
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={async () => {
+                if (edited) await save();
+                const t = await call(`/api/actions/${action.id}/gmail-draft`, {});
+                if (t) toast.success("Saved to your Gmail drafts");
+              }}
+            >
+              Save to Gmail drafts
+            </Button>
+          </div>
+        ) : connections?.available ? (
+          <button onClick={() => void connect("gmail")} className="text-left text-[13px] font-medium text-accent-text underline underline-offset-2">
+            Connect Gmail to send this from LooseEnds
+          </button>
+        ) : null
+      ) : null}
       <div className="flex flex-wrap gap-2">
-        <Button variant="primary" onClick={() => void copy()} disabled={busy}>
+        <Button variant={gmail ? "secondary" : "primary"} onClick={() => void copy()} disabled={busy}>
           <CopySimple size={16} /> Copy reply
         </Button>
         <Button variant="secondary" onClick={() => void openMail()} disabled={busy}>
@@ -504,7 +576,7 @@ function DraftSkeleton() {
       <p className="flex items-center gap-2 text-[13.5px] text-muted">
         <Sparkle size={15} className="text-accent" /> Writing a draft from the message…
       </p>
-      <Skeleton className="h-10 w-full rounded-xl" />
+      <Skeleton className="h-10 w-full rounded-lg" />
       <Skeleton className="h-4 w-11/12" />
       <Skeleton className="h-4 w-10/12" />
       <Skeleton className="h-4 w-8/12" />
@@ -535,6 +607,8 @@ function gcalUrl(e: EventPayload) {
 function EventPanel({ task }: { task: Task }) {
   const action = task.actions.find((a) => a.kind === "event") as Extract<Action, { kind: "event" }> | undefined;
   const { call, receipt } = useActionCalls(task);
+  const { connections, connect } = useWork();
+  const gcal = !!connections?.googlecalendar.connected;
   const base = action?.payload;
   const [title, setTitle] = useState(base?.title ?? task.title);
   const [allDay, setAllDay] = useState(base?.allDay ?? task.dueAllDay);
@@ -563,7 +637,7 @@ function EventPanel({ task }: { task: Task }) {
 
   return (
     <div className="space-y-4">
-      <NotSentBanner>Suggested, not created. Your calendar only changes when you add the event yourself.</NotSentBanner>
+      <NotSentBanner>Suggested, not created. Your calendar only changes when you add the event.</NotSentBanner>
       <div className="space-y-1.5">
         <Label htmlFor="e-title">Event</Label>
         <Input id="e-title" value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -617,15 +691,34 @@ function EventPanel({ task }: { task: Task }) {
       </Button>
 
       {action ? (
-        <div className="space-y-3 rounded-2xl border border-line bg-surface p-4">
+        <div className="space-y-3 rounded-xl border border-line bg-surface p-4">
           <div>
             <p className="font-medium">{action.payload.title}</p>
             <p className="text-[13.5px] text-muted">{formatDue(action.payload.start, action.payload.allDay)}</p>
           </div>
+          {action.receipts.some((r) => r.what === "Added to Google Calendar") ? (
+            <p className="flex items-center gap-2 text-[13.5px] font-medium text-accent-text">
+              <Check size={15} weight="bold" /> Added to Google Calendar
+            </p>
+          ) : gcal ? (
+            <ConfirmSend
+              label="Add to Google Calendar"
+              confirmLabel="Add it"
+              detail={`Add “${action.payload.title}” on ${formatDue(action.payload.start, action.payload.allDay)} to your calendar?`}
+              onSend={async () => {
+                const t = await call(`/api/actions/${action.id}/send`, { confirm: true });
+                if (t) toast.success("Added to Google Calendar");
+              }}
+            />
+          ) : connections?.available ? (
+            <button onClick={() => void connect("googlecalendar")} className="text-left text-[13px] font-medium text-accent-text underline underline-offset-2">
+              Connect Google Calendar to add it in one tap
+            </button>
+          ) : null}
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
-              variant="primary"
+              variant="secondary"
               onClick={() => {
                 window.location.href = `/api/actions/${action.id}/ics`;
                 void receipt(action, "Downloaded calendar file");
@@ -724,7 +817,7 @@ function ReminderPanel({ task }: { task: Task }) {
             key={p.label}
             disabled={busy}
             onClick={() => void set(p.at)}
-            className="flex h-14 flex-col items-start justify-center rounded-xl border border-line-strong bg-surface px-4 text-left transition-colors hover:border-accent hover:bg-accent-soft disabled:opacity-50"
+            className="flex h-14 flex-col items-start justify-center rounded-lg border border-line-strong bg-surface px-4 text-left transition-colors hover:border-accent hover:bg-accent-soft disabled:opacity-50"
           >
             <span className="text-[14px] font-medium text-ink">{p.label}</span>
             <span className="text-[12px] text-muted">{formatDue(p.at.toISOString(), false)}</span>
@@ -758,7 +851,7 @@ function ReminderPanel({ task }: { task: Task }) {
           <p className="text-[13px] font-medium text-ink-2">Scheduled</p>
           <ul className="space-y-2">
             {reminders.map((r) => (
-              <li key={r.id} className="flex items-center gap-3 rounded-xl bg-surface px-3.5 py-2.5">
+              <li key={r.id} className="flex items-center gap-3 rounded-lg bg-surface px-3.5 py-2.5">
                 <BellSimple size={16} className={r.payload.firedAt ? "text-muted" : "text-accent"} />
                 <div className="min-w-0 flex-1 text-[13.5px]">
                   <p className="font-medium">{formatDue(r.payload.remindAt, false)}</p>
@@ -836,7 +929,7 @@ function SourcePanel({ task, onDeleted }: { task: Task; onDeleted: () => void })
         <span>· {timeAgo(source.createdAt)}</span>
       </div>
       {source.injectionDetected ? (
-        <p className="flex items-start gap-2 rounded-xl bg-warn-soft px-3.5 py-2.5 text-[13px] leading-relaxed text-ink-2">
+        <p className="flex items-start gap-2 rounded-lg bg-warn-soft px-3.5 py-2.5 text-[13px] leading-relaxed text-ink-2">
           <ShieldWarning size={16} className="mt-0.5 shrink-0 text-warn" />
           This message contained instructions aimed at an AI assistant. LooseEnds treated them as plain text and ignored them.
         </p>
@@ -844,7 +937,7 @@ function SourcePanel({ task, onDeleted }: { task: Task; onDeleted: () => void })
       {source.kind === "image" ? (
         <p className="text-[12.5px] text-muted">Text read from your screenshot. The image itself isn't stored.</p>
       ) : null}
-      <div className="max-h-[46dvh] overflow-y-auto whitespace-pre-wrap rounded-xl border border-line bg-surface px-4 py-3.5 text-[14px] leading-relaxed text-ink-2">
+      <div className="max-h-[46dvh] overflow-y-auto whitespace-pre-wrap rounded-lg border border-line bg-surface px-4 py-3.5 text-[14px] leading-relaxed text-ink-2">
         {hasRange ? (
           <>
             {source.content.slice(0, start!)}
@@ -861,7 +954,7 @@ function SourcePanel({ task, onDeleted }: { task: Task; onDeleted: () => void })
         <p className="text-[12.5px] text-muted">LooseEnds couldn't pin the exact sentence, so double-check this task against the message.</p>
       ) : null}
       {confirming ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-danger-soft px-3.5 py-2.5 text-[13px]">
+        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-danger-soft px-3.5 py-2.5 text-[13px]">
           <span className="flex-1 text-ink-2">Delete this source and every task found in it?</span>
           <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
             Cancel

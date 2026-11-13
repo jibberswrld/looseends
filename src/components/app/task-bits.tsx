@@ -72,7 +72,10 @@ export const STATUS_FLOW: Task["status"][] = ["detected", "reviewed", "prepared"
 
 export function primaryActionLabel(t: Task): { label: string; panel: "reply" | "event" | "reminder" } {
   const has = (k: string) => t.actions.some((a) => a.kind === k);
-  if (t.nextStepType === "reply") return { label: has("reply") ? "Open draft" : "Draft reply", panel: "reply" };
+  if (t.nextStepType === "reply") {
+    const sent = t.actions.some((a) => a.kind === "reply" && a.receipts.some((r) => r.what === "Sent with Gmail"));
+    return { label: sent ? "View reply" : has("reply") ? "Open draft" : "Draft reply", panel: "reply" };
+  }
   if (t.nextStepType === "event") return { label: has("event") ? "Open event" : "Prepare event", panel: "event" };
   return { label: has("reminder") ? "Reminder" : "Remind me", panel: "reminder" };
 }

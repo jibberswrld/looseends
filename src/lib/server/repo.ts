@@ -5,7 +5,7 @@ import { HttpError } from "./http";
 const iso = (v: unknown): string | null => (v ? new Date(v as string).toISOString() : null);
 
 export function toSourceSummary(r: Row): SourceSummary {
-  return { id: r.id, kind: r.kind, title: r.title, createdAt: iso(r.created_at)!, injectionDetected: !!r.injection_detected };
+  return { id: r.id, kind: r.kind, title: r.title, createdAt: iso(r.created_at)!, injectionDetected: !!r.injection_detected, from: r.sender ?? null };
 }
 
 export function toSource(r: Row): Source {
@@ -58,7 +58,7 @@ export async function hydrate(rows: Row[]): Promise<Task[]> {
   const sourceIds = [...new Set(rows.map((r) => r.source_id).filter(Boolean))];
   const [actions, sources] = await Promise.all([
     sql`select * from actions where task_id = any(${ids}::uuid[]) order by created_at`,
-    sourceIds.length ? sql`select id, kind, title, created_at, injection_detected from sources where id = any(${sourceIds}::uuid[])` : Promise.resolve([] as Row[]),
+    sourceIds.length ? sql`select id, kind, title, created_at, injection_detected, sender from sources where id = any(${sourceIds}::uuid[])` : Promise.resolve([] as Row[]),
   ]);
   const byTask = new Map<string, Row[]>();
   for (const a of actions) byTask.set(a.task_id, [...(byTask.get(a.task_id) ?? []), a]);

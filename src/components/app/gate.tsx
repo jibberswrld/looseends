@@ -114,7 +114,7 @@ export function Gate({ children }: { children: ReactNode }) {
           <ul className="mt-10 space-y-5 text-[15px] text-ink-2">
             <li className="flex gap-3">
               <ShieldCheck size={20} weight="duotone" className="mt-0.5 shrink-0 text-accent" />
-              Drafts and calendar events are prepared for you to review. Nothing is sent on your behalf.
+              Replies and calendar events are prepared for you to review. Nothing goes out until you confirm it.
             </li>
             <li className="flex gap-3">
               <LockSimple size={20} weight="duotone" className="mt-0.5 shrink-0 text-accent" />
@@ -147,7 +147,7 @@ function GateSkeleton() {
       <Skeleton className="h-8 w-2/3" />
       <Skeleton className="h-4 w-full" />
       <Skeleton className="h-4 w-4/5" />
-      <Skeleton className="mt-6 h-12 w-full rounded-xl" />
+      <Skeleton className="mt-6 h-12 w-full rounded-lg" />
     </div>
   );
 }
@@ -238,7 +238,7 @@ export function OwnKeyForm({
   const [model, setModel] = useState("gpt-4o-mini");
   return (
     <form
-      className="mt-5 space-y-4 rounded-2xl border border-line bg-surface p-4"
+      className="mt-5 space-y-4 rounded-xl border border-line bg-surface p-4"
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit({ baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), model: model.trim() });
@@ -285,7 +285,7 @@ function Panel({
 }) {
   return (
     <div>
-      {icon ? <div className="mb-5 inline-flex size-11 items-center justify-center rounded-2xl bg-surface-2 text-ink-2">{icon}</div> : null}
+      {icon ? <div className="mb-5 inline-flex size-11 items-center justify-center rounded-xl bg-surface-2 text-ink-2">{icon}</div> : null}
       <h1 className="text-[28px] font-semibold leading-tight tracking-[-0.025em]">{title}</h1>
       <p className="mt-3 max-w-[48ch] text-[15px] leading-relaxed text-muted">{body}</p>
       {children ? <div className="mt-8">{children}</div> : null}

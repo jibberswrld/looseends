@@ -12,6 +12,6 @@ export function PageHeader({ title, sub, right }: { title: ReactNode; sub?: Reac
   );
 }
 
-export function Page({ children }: { children: ReactNode }) {
-  return <main className="mx-auto w-full max-w-[760px] px-4 py-7 sm:px-8 sm:py-10">{children}</main>;
+export function Page({ children, wide }: { children: ReactNode; wide?: boolean }) {
+  return <main className={`mx-auto w-full px-4 py-7 sm:px-8 sm:py-9 ${wide ? "max-w-[1180px]" : "max-w-[760px]"}`}>{children}</main>;
 }

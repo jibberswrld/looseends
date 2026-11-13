@@ -28,7 +28,7 @@ export const Button = forwardRef<
       ref={ref}
       disabled={disabled || loading}
       className={cx(
-        "inline-flex shrink-0 select-none items-center justify-center whitespace-nowrap rounded-xl font-medium transition-[background-color,color,transform,opacity] duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50",
+        "inline-flex shrink-0 select-none items-center justify-center whitespace-nowrap rounded-lg font-medium transition-[background-color,color,transform,opacity] duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50",
         variants[variant],
         sizes[size],
         className,
@@ -61,7 +61,7 @@ export function IconButton({
       aria-label={label}
       title={label}
       className={cx(
-        "inline-flex size-9 shrink-0 items-center justify-center rounded-xl text-muted transition-colors hover:bg-surface-2 hover:text-ink active:scale-[0.97] disabled:opacity-40",
+        "inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-ink active:scale-[0.97] disabled:opacity-40",
         className,
       )}
       {...rest}
@@ -104,7 +104,7 @@ export function Label({ htmlFor, children, hint }: { htmlFor: string; children: 
 }
 
 const fieldBase =
-  "w-full rounded-xl border border-line-strong bg-surface px-3 text-[15px] text-ink placeholder:text-muted/80 transition-colors focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:opacity-60";
+  "w-full rounded-lg border border-line-strong bg-surface px-3 text-[15px] text-ink placeholder:text-muted/80 transition-colors focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:opacity-60";
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input(
   { className, ...rest },

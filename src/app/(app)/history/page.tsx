@@ -49,7 +49,7 @@ export default function HistoryPage() {
         title="History"
         sub={history ? (doneCount ? `${doneCount} ${doneCount === 1 ? "thing" : "things"} finished. Everything you approved or dismissed is here too.` : "Finished, approved and dismissed tasks show up here.") : " "}
       />
-      <div role="tablist" aria-label="Filter" className="mt-6 inline-flex rounded-xl bg-surface-2 p-1">
+      <div role="tablist" aria-label="Filter" className="mt-6 inline-flex rounded-lg bg-surface-2 p-1">
         {(["all", "completed", "approved", "dismissed"] as Filter[]).map((f) => (
           <button
             key={f}
@@ -69,11 +69,11 @@ export default function HistoryPage() {
       {!groups ? (
         <div className="mt-8 space-y-3">
           {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-16 w-full rounded-2xl" />
+            <Skeleton key={i} className="h-16 w-full rounded-xl" />
           ))}
         </div>
       ) : groups.length === 0 ? (
-        <div className="mt-8 rounded-2xl border border-line bg-surface p-6 text-[14px] text-muted">
+        <div className="mt-8 rounded-xl border border-line bg-surface p-6 text-[14px] text-muted">
           Nothing here yet. When you finish or dismiss something, it lands here so you can always see what happened.
         </div>
       ) : (
@@ -81,7 +81,7 @@ export default function HistoryPage() {
           {groups.map(([day, tasks]) => (
             <section key={day}>
               <h2 className="mb-2.5 text-[13px] font-semibold text-muted">{day}</h2>
-              <ul className="overflow-hidden rounded-2xl border border-line bg-surface">
+              <ul className="overflow-hidden rounded-xl border border-line bg-surface">
                 {tasks.map((t, i) => {
                   const Icon = t.status === "completed" ? CheckCircle : t.status === "approved" ? SealCheck : Prohibit;
                   const receipts = t.actions.flatMap((a) => a.receipts);

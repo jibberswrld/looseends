@@ -1,57 +1,56 @@
 @import "tailwindcss";
 
 /*
-  LooseEnds design tokens.
-  One accent (teal). Amber is reserved for "needs your review" state, red for overdue/failed.
-  Radius rule: cards/sheets 16px (rounded-2xl), buttons + inputs 12px (rounded-xl), chips full pill.
-  Theme follows the system (prefers-color-scheme).
+  LooseEnds v2 tokens. Direction: product-first workspace (Linear, Supabase), dark-first, follows the system.
+  Every neutral is tinted with the brand hue (185). One accent: deep brand as fill, bright brand as text.
+  Amber = needs you. Red = overdue / failed. Muted text is an alpha ladder of the one ink.
+  Radii: controls 8px (rounded-lg), panels 12px (rounded-xl), pills only for chips.
+  Signature: the work stream (mono voice, live lines) on the home screen.
 */
 :root {
-  --bg: #f4f5f3;
-  --surface: #fcfcfb;
-  --surface-2: #eef0ed;
-  --ink: #13171a;
-  --ink-2: #3a4247;
-  --muted: #5d676d;
-  --line: rgb(19 23 26 / 0.09);
-  --line-strong: rgb(19 23 26 / 0.16);
-  --accent: #0f7a6c;
-  --accent-ink: #f4fbf9;
-  --accent-hover: #0c6a5e;
-  --accent-soft: #e1efeb;
-  --accent-text: #0b6357;
-  --warn: #9a5b0b;
-  --warn-soft: #f6ead6;
-  --danger: #b4322b;
-  --danger-soft: #f7e3e1;
-  --shadow: 0 1px 2px rgb(19 40 36 / 0.05), 0 8px 24px -12px rgb(19 40 36 / 0.12);
-  --shadow-lg: 0 2px 6px rgb(19 40 36 / 0.06), 0 24px 60px -24px rgb(19 40 36 / 0.28);
+  --bg: oklch(0.975 0.004 185);
+  --surface: oklch(0.995 0.002 185);
+  --surface-2: oklch(0.948 0.006 185);
+  --ink: oklch(0.22 0.012 185);
+  --line: oklch(0.22 0.012 185 / 0.09);
+  --line-strong: oklch(0.22 0.012 185 / 0.16);
+  --accent: oklch(0.47 0.092 175);
+  --accent-hover: oklch(0.42 0.088 175);
+  --accent-ink: oklch(0.985 0.01 175);
+  --accent-text: oklch(0.42 0.09 175);
+  --warn: oklch(0.5 0.115 70);
+  --danger: oklch(0.52 0.17 27);
+  --shadow: 0 1px 1px oklch(0.3 0.03 185 / 0.04), 0 4px 12px -6px oklch(0.3 0.03 185 / 0.08);
+  --shadow-lg: 0 2px 4px oklch(0.3 0.03 185 / 0.05), 0 12px 28px -10px oklch(0.3 0.03 185 / 0.09), 0 32px 64px -24px oklch(0.3 0.03 185 / 0.09);
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0d1012;
-    --surface: #14181b;
-    --surface-2: #1b2024;
-    --ink: #e9eceb;
-    --ink-2: #c3cacc;
-    --muted: #949ea3;
-    --line: rgb(255 255 255 / 0.08);
-    --line-strong: rgb(255 255 255 / 0.15);
-    --accent: #2bb19c;
-    --accent-ink: #06201c;
-    --accent-hover: #3cc3ad;
-    --accent-soft: rgb(43 177 156 / 0.13);
-    --accent-text: #5fd0bd;
-    --warn: #e0a64e;
-    --warn-soft: rgb(224 166 78 / 0.13);
-    --danger: #ef7a72;
-    --danger-soft: rgb(239 122 114 / 0.12);
-    --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -12px rgb(0 0 0 / 0.5);
-    --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.3), 0 24px 60px -24px rgb(0 0 0 / 0.7);
+    --bg: oklch(0.165 0.006 185);
+    --surface: oklch(0.2 0.007 185);
+    --surface-2: oklch(0.24 0.008 185);
+    --ink: oklch(0.955 0.004 185);
+    --line: oklch(1 0 0 / 0.075);
+    --line-strong: oklch(1 0 0 / 0.14);
+    --accent: oklch(0.53 0.1 175);
+    --accent-hover: oklch(0.58 0.105 175);
+    --accent-ink: oklch(0.99 0.008 175);
+    --accent-text: oklch(0.82 0.125 175);
+    --warn: oklch(0.82 0.12 80);
+    --danger: oklch(0.74 0.15 25);
+    --shadow: 0 1px 0 oklch(1 0 0 / 0.03) inset;
+    --shadow-lg: 0 1px 0 oklch(1 0 0 / 0.05) inset, 0 24px 60px -20px oklch(0 0 0 / 0.6);
     color-scheme: dark;
   }
+}
+
+:root {
+  --ink-2: color-mix(in oklab, var(--ink) 80%, transparent);
+  --muted: color-mix(in oklab, var(--ink) 58%, transparent);
+  --accent-soft: color-mix(in oklab, var(--accent-text) 13%, transparent);
+  --warn-soft: color-mix(in oklab, var(--warn) 14%, transparent);
+  --danger-soft: color-mix(in oklab, var(--danger) 13%, transparent);
 }
 
 @theme inline {
@@ -87,28 +86,28 @@ html {
 
 body {
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 15px;
+  font-weight: 450;
   font-feature-settings: "ss01", "cv11";
   text-rendering: optimizeLegibility;
 }
 
 ::selection {
   background: var(--accent-soft);
-  color: var(--ink);
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-text);
   outline-offset: 2px;
-  border-radius: 10px;
+  border-radius: 6px;
 }
 
-/* Evidence highlight inside the source viewer */
 mark.evidence {
-  background: color-mix(in oklab, var(--accent) 22%, transparent);
+  background: color-mix(in oklab, var(--accent-text) 22%, transparent);
   color: inherit;
-  border-radius: 4px;
+  border-radius: 3px;
   padding: 0 2px;
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 35%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent-text) 30%, transparent);
 }
 
 .scrollbar-none {
@@ -119,34 +118,41 @@ mark.evidence {
 }
 
 @keyframes shimmer {
-  from {
-    background-position: -200% 0;
-  }
-  to {
-    background-position: 200% 0;
-  }
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
 }
 .skeleton {
-  background: linear-gradient(90deg, var(--surface-2) 25%, color-mix(in oklab, var(--surface-2) 60%, var(--surface)) 50%, var(--surface-2) 75%);
+  background: linear-gradient(90deg, var(--surface-2) 25%, color-mix(in oklab, var(--surface-2) 55%, var(--surface)) 50%, var(--surface-2) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.6s linear infinite;
 }
 
-@keyframes marquee {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(-50%);
-  }
+/* The work stream caret and the "working" sweep on the stream header */
+@keyframes caret { 50% { opacity: 0; } }
+.caret::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  margin-left: 3px;
+  vertical-align: -0.18em;
+  background: var(--accent-text);
+  animation: caret 1s steps(1) infinite;
 }
-.marquee-track {
-  animation: marquee 48s linear infinite;
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(400%); } }
+.sweep {
+  position: relative;
+  overflow: hidden;
+}
+.sweep::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 25%;
+  background: linear-gradient(90deg, transparent, var(--accent-text), transparent);
+  animation: sweep 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .skeleton,
-  .marquee-track {
-    animation: none;
-  }
+  .skeleton, .caret::after, .sweep::after { animation: none; }
 }

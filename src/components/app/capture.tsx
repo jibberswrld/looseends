@@ -163,7 +163,7 @@ export function CaptureForm({ compact = false, onFinish }: { compact?: boolean; 
           if (f) attach(f);
         }}
         className={cx(
-          "rounded-2xl border bg-surface shadow-card transition-colors",
+          "rounded-xl border bg-surface shadow-card transition-colors",
           drag ? "border-accent ring-4 ring-accent/15" : "border-line",
         )}
       >
@@ -190,7 +190,7 @@ export function CaptureForm({ compact = false, onFinish }: { compact?: boolean; 
           className="resize-none border-0 bg-transparent px-5 pt-4 text-[15.5px] shadow-none focus:ring-0"
         />
         {att ? (
-          <div className="mx-4 mb-3 flex items-center gap-3 rounded-xl bg-surface-2 p-2 pr-3">
+          <div className="mx-4 mb-3 flex items-center gap-3 rounded-lg bg-surface-2 p-2 pr-3">
             {att.preview ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={att.preview} alt="" className="size-11 rounded-lg object-cover" />
@@ -259,7 +259,7 @@ export function CaptureForm({ compact = false, onFinish }: { compact?: boolean; 
               ))}
             </ol>
             {[0, 1].map((i) => (
-              <div key={i} className="rounded-2xl border border-line bg-surface p-5">
+              <div key={i} className="rounded-xl border border-line bg-surface p-5">
                 <div className="flex justify-between gap-4">
                   <div className="skeleton h-5 w-1/2 rounded-md" />
                   <div className="skeleton h-6 w-24 rounded-full" />
@@ -270,7 +270,7 @@ export function CaptureForm({ compact = false, onFinish }: { compact?: boolean; 
             ))}
           </motion.div>
         ) : error ? (
-          <motion.div key="err" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} role="alert" className="rounded-2xl bg-danger-soft px-5 py-4 text-[14px] text-ink-2">
+          <motion.div key="err" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} role="alert" className="rounded-xl bg-danger-soft px-5 py-4 text-[14px] text-ink-2">
             <p>{error.message}</p>
             <div className="mt-3 flex gap-2">
               {error.topUpUrl ? (
@@ -321,7 +321,7 @@ function CaptureResultView({ result, onForce, onDone, onFinish }: { result: Capt
   return (
     <div className="space-y-5">
       {result.source?.injectionDetected ? (
-        <p className="flex items-start gap-2 rounded-xl bg-warn-soft px-4 py-3 text-[13.5px] leading-relaxed text-ink-2">
+        <p className="flex items-start gap-2 rounded-lg bg-warn-soft px-4 py-3 text-[13.5px] leading-relaxed text-ink-2">
           <ShieldWarning size={17} className="mt-0.5 shrink-0 text-warn" />
           This message tried to give instructions to an AI. LooseEnds ignored them and only looked for real tasks. Nothing was sent or changed.
         </p>
@@ -359,7 +359,7 @@ function CaptureResultView({ result, onForce, onDone, onFinish }: { result: Capt
       )}
 
       {promo.length ? (
-        <details className="group rounded-2xl border border-line bg-surface px-5 py-3.5">
+        <details className="group rounded-xl border border-line bg-surface px-5 py-3.5">
           <summary className="cursor-pointer list-none text-[13.5px] font-medium text-ink-2">
             {promo.length} probably promotional {promo.length === 1 ? "item" : "items"}, hidden from Today
           </summary>
@@ -385,7 +385,7 @@ function ReviewCard({ task }: { task: Task }) {
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
-      className={cx("list-none rounded-2xl border bg-surface p-4 transition-opacity sm:p-5", decided ? "border-line" : "border-line-strong shadow-card", dismissed && "opacity-55")}
+      className={cx("list-none rounded-xl border bg-surface p-4 transition-opacity sm:p-5", decided ? "border-line" : "border-line-strong shadow-card", dismissed && "opacity-55")}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <h3 className={cx("text-[15.5px] font-semibold leading-snug", dismissed && "line-through")}>{task.title}</h3>
@@ -447,9 +447,9 @@ function ReviewCard({ task }: { task: Task }) {
 
 function Notice({ icon, title, body, children }: { icon: React.ReactNode; title: string; body: string; children?: React.ReactNode }) {
   return (
-    <div className="rounded-2xl border border-line bg-surface p-5">
+    <div className="rounded-xl border border-line bg-surface p-5">
       <div className="flex gap-3">
-        <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl bg-surface-2 text-ink-2">{icon}</span>
+        <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-ink-2">{icon}</span>
         <div className="min-w-0 flex-1">
           <h2 className="text-[16px] font-semibold">{title}</h2>
           <p className="mt-1 text-[14px] leading-relaxed text-muted">{body}</p>
@@ -525,9 +525,9 @@ export function CaptureLinkCard() {
   return (
     <Link
       href="/capture"
-      className="group flex items-center gap-4 rounded-2xl border border-dashed border-line-strong bg-surface/60 px-5 py-4 text-left transition-colors hover:border-accent hover:bg-surface"
+      className="group flex items-center gap-4 rounded-xl border border-dashed border-line-strong bg-surface/60 px-5 py-4 text-left transition-colors hover:border-accent hover:bg-surface"
     >
-      <span className="inline-flex size-10 items-center justify-center rounded-xl bg-accent-soft text-accent">
+      <span className="inline-flex size-10 items-center justify-center rounded-lg bg-accent-soft text-accent">
         <ImageSquare size={20} />
       </span>
       <span className="min-w-0 flex-1">

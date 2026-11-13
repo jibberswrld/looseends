@@ -51,7 +51,7 @@ export interface Task {
   actions: Action[];
 }
 
-export type SourceKind = "text" | "image" | "pdf" | "manual";
+export type SourceKind = "text" | "image" | "pdf" | "manual" | "gmail";
 export type SourceClassification = "obligations" | "no_action" | "promotional";
 
 export interface SourceSummary {
@@ -60,6 +60,7 @@ export interface SourceSummary {
   title: string; // "Email from Dr. Patel's office", file name, etc.
   createdAt: string;
   injectionDetected: boolean; // the content contained instructions aimed at an AI; they were ignored
+  from: string | null; // sender display name/address for gmail sources, else null
 }
 
 export interface Source extends SourceSummary {
@@ -154,4 +155,36 @@ export interface CaptureResult {
 // Every API error is { error: { code, message, topUpUrl? } } with a non-2xx status.
 export interface ApiError {
   error: { code: string; message: string; topUpUrl?: string | null };
+}
+
+// ---- Connected accounts (Gmail / Google Calendar through Composio, via the LooseEnds connector service) ----
+export type Toolkit = "gmail" | "googlecalendar";
+export interface Connections {
+  available: boolean; // false when the connector service is not configured or unreachable
+  message: string | null; // why it is unavailable, in plain words
+  gmail: { connected: boolean; lastScanAt: string | null };
+  googlecalendar: { connected: boolean };
+}
+// GET  /api/connections                      -> Connections
+// POST /api/connections/link {toolkit}       -> { url }   (open in a new tab; then poll GET /api/connections)
+// POST /api/connections/disconnect {toolkit} -> Connections
+
+// POST /api/inbox/scan  -> NDJSON stream (content-type application/x-ndjson), one ScanEvent per line.
+export type ScanEvent =
+  | { type: "step"; text: string } // "Opening your inbox", "Reading 12 unread emails"
+  | { type: "email"; from: string; subject: string; outcome: "tasks" | "promotional" | "no_action" | "duplicate"; tasks: Task[] }
+  | { type: "done"; scanned: number; found: number; skipped: number }
+  | { type: "error"; code: string; message: string; topUpUrl?: string | null };
+
+// POST /api/actions/:id/send {confirm: true} -> { task }
+//   reply action: sends the reply with the user's Gmail (in the original thread when the source is a gmail message).
+//   event action: creates the event in the user's Google Calendar.
+//   Requires the matching connection and confirm === true. Idempotent: an action already sent returns the task unchanged.
+//   Appends a receipt ("Sent with Gmail" / "Added to Google Calendar"); on failure sets action.status "failed" + error.
+// POST /api/actions/:id/gmail-draft -> { task }  saves the reply as a draft in Gmail; receipt "Saved to Gmail drafts".
+
+// POST /api/ask {question} -> AskAnswer   answers a question about the user's own queue ("what's due this week?")
+export interface AskAnswer {
+  answer: string; // short plain text
+  taskIds: string[]; // tasks the answer refers to, in order
 }

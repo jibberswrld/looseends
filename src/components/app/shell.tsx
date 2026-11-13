@@ -38,7 +38,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 href={n.href}
                 aria-current={active ? "page" : undefined}
                 className={cx(
-                  "flex h-10 items-center gap-3 rounded-xl px-3 text-[14px] font-medium transition-colors",
+                  "flex h-10 items-center gap-3 rounded-lg px-3 text-[14px] font-medium transition-colors",
                   active ? "bg-surface text-ink shadow-card" : "text-muted hover:bg-surface-2 hover:text-ink",
                 )}
               >
@@ -56,7 +56,7 @@ export function Shell({ children }: { children: ReactNode }) {
             href="/settings"
             aria-current={path.startsWith("/settings") ? "page" : undefined}
             className={cx(
-              "flex h-10 items-center gap-3 rounded-xl px-3 text-[14px] font-medium transition-colors",
+              "flex h-10 items-center gap-3 rounded-lg px-3 text-[14px] font-medium transition-colors",
               path.startsWith("/settings") ? "bg-surface text-ink shadow-card" : "text-muted hover:bg-surface-2 hover:text-ink",
             )}
           >
@@ -69,7 +69,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <div className="min-w-0 pb-24 lg:pb-0">
         <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-line bg-bg/85 px-4 backdrop-blur-md lg:hidden">
           <Wordmark href="/" />
-          <Link href="/settings" aria-label="Settings" className="inline-flex size-9 items-center justify-center rounded-xl text-muted hover:bg-surface-2">
+          <Link href="/settings" aria-label="Settings" className="inline-flex size-9 items-center justify-center rounded-lg text-muted hover:bg-surface-2">
             <GearSix size={20} />
           </Link>
         </header>
@@ -91,7 +91,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 className={cx("flex h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium", active ? "text-ink" : "text-muted")}
               >
                 {n.href === "/capture" ? (
-                  <span className="inline-flex size-9 items-center justify-center rounded-xl bg-accent text-accent-ink">
+                  <span className="inline-flex size-9 items-center justify-center rounded-lg bg-accent text-accent-ink">
                     <Plus size={20} weight="bold" />
                   </span>
                 ) : (

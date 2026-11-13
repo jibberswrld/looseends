@@ -22,6 +22,8 @@ export interface CaptureInput {
   fileName: string | null;
   title: string | null;
   force: boolean;
+  /** Set by the inbox scan (kind "gmail"): where the email came from, so it is imported once and replies stay in its thread. */
+  gmail?: { from: string; externalId: string; threadId: string | null };
 }
 
 /** Parse the request body: JSON {text, title?, force?} or multipart with `file` (image or PDF). */
@@ -69,7 +71,7 @@ export async function capture(ctx: Ctx, input: CaptureInput): Promise<CaptureRes
   const hash = input.image ? `img:${createHash("sha256").update(input.image.bytes).digest("hex")}` : contentHash(input.text!);
 
   if (!input.force) {
-    const dup = (await sql`select id, kind, title, created_at, injection_detected from sources where user_id = ${user.id} and content_hash = ${hash} order by created_at desc limit 1`)[0];
+    const dup = (await sql`select id, kind, title, created_at, injection_detected, sender from sources where user_id = ${user.id} and content_hash = ${hash} order by created_at desc limit 1`)[0];
     if (dup) {
       return { outcome: "duplicate_source", source: null, tasks: [], duplicateOf: toSourceSummary(dup), message: "You already added this. Its tasks are in your queue, or you can add it again anyway." };
     }
@@ -104,8 +106,9 @@ export async function capture(ctx: Ctx, input: CaptureInput): Promise<CaptureRes
     : realTasks.length > 0 ? "obligations" : "no_action";
 
   const src = (await sql`
-    insert into sources (user_id, kind, title, content, content_hash, classification, summary, injection_detected)
-    values (${user.id}, ${input.kind}, ${title}, ${content}, ${hash}, ${classification}, ${ex.summary}, ${ex.injection_detected})
+    insert into sources (user_id, kind, title, content, content_hash, classification, summary, injection_detected, external_id, thread_id, sender)
+    values (${user.id}, ${input.kind}, ${title}, ${content}, ${hash}, ${classification}, ${ex.summary}, ${ex.injection_detected},
+      ${input.gmail?.externalId ?? null}, ${input.gmail?.threadId ?? null}, ${input.gmail?.from ?? null})
     returning *`)[0];
 
   const open = await sql`select id, title, evidence_quote from tasks where user_id = ${user.id} and status not in ('completed', 'dismissed') and (source_id is null or source_id <> ${src.id})`;

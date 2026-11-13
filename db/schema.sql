@@ -103,3 +103,12 @@ create table if not exists events (
   created_at timestamptz not null default now()
 );
 create index if not exists events_name_time_idx on events(name, created_at);
+
+-- Gmail / Google Calendar (through the LooseEnds connector service).
+alter table users add column if not exists gmail_last_scan_at timestamptz;
+alter table sources add column if not exists external_id text; -- gmail message id
+alter table sources add column if not exists thread_id text;
+alter table sources add column if not exists sender text;
+create unique index if not exists sources_user_external_idx on sources(user_id, external_id) where external_id is not null;
+alter table actions add column if not exists external_id text; -- gmail message / draft id, or calendar event id
+alter table actions add column if not exists sent_at timestamptz; -- set before sending: at most one send per action
