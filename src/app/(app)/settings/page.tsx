@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowSquareOut, Bell, Key, Plugs, ShieldCheck, SignOut, Trash, Wallet } from "@phosphor-icons/react";
 import { toast } from "sonner";
@@ -179,11 +180,25 @@ export default function SettingsPage() {
 
         <Row icon={<ShieldCheck size={18} />} title="What LooseEnds can and can't do">
           <ul className="list-disc space-y-1 pl-5">
-            <li>It reads what you paste or upload. If you connect Gmail, it also reads recent inbox mail when you ask it to check.</li>
-            <li>It sends an email or adds a calendar event only when you press send and confirm that exact preview. It never pays, books or deletes anything.</li>
-            <li>Instructions hidden inside a message are treated as text, never as commands.</li>
+            <li>It reads what you paste or upload, and the apps you connect when you ask it something or ask it to check your inbox.</li>
+            <li>
+              Anything that changes something outside LooseEnds, such as sending an email, posting a message, adding an event or deleting
+              something in a connected app, happens only after you approve that exact action on its card. It never pays for anything.
+            </li>
+            <li>Instructions inside a message are treated as text. They can&apos;t approve an action for you.</li>
             <li>Screenshots are read and then discarded. Only the text is kept, so you can see where each task came from.</li>
           </ul>
+          <p className="mt-3">
+            <Link href="/privacy" className="font-medium text-ink underline decoration-line-strong underline-offset-[3px] hover:decoration-ink">
+              Privacy
+            </Link>
+            <span className="px-2" aria-hidden>
+              ·
+            </span>
+            <Link href="/terms" className="font-medium text-ink underline decoration-line-strong underline-offset-[3px] hover:decoration-ink">
+              Terms
+            </Link>
+          </p>
         </Row>
 
         <section className="rounded-xl border border-danger/25 bg-surface p-5 sm:p-6">
@@ -191,7 +206,7 @@ export default function SettingsPage() {
             <Trash size={18} /> Delete everything
           </h2>
           <p className="mt-1.5 text-[14px] leading-relaxed text-muted">
-            Permanently removes your tasks, drafts, reminders, every message you added, and your stored key. This can't be undone.
+            Permanently removes your tasks, drafts, reminders, every message you added, your chat with the assistant and your stored key, and disconnects your connected apps. This can&apos;t be undone.
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <input

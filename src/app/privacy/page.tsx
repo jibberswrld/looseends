@@ -4,29 +4,41 @@ import { Wordmark } from "@/components/brand";
 
 export const metadata: Metadata = { title: "Privacy" };
 
+const APPS = "Gmail, Google Calendar, Outlook, Slack, Notion, Google Drive, Google Docs, Google Sheets, GitHub, Linear and Todoist";
+
 const SECTIONS: [string, string[]][] = [
   [
     "What LooseEnds stores",
     [
       "The text of messages you paste, the text read from screenshots, and the text extracted from PDFs. Image and PDF files themselves are not kept.",
+      "When it checks your inbox or reads an email you point it to, the sender, subject and body of each email it reads (up to about 8,000 characters per message).",
       "The tasks, drafts, calendar events and reminders created from them, and receipts of what you did with them.",
-      "Your list is stored in LooseEnds' database. Your publik install key and any AI key you provide are encrypted there.",
-      "Your publik handle, time zone, and simple usage events (without message content) are stored there too.",
+      "Your conversation with the assistant, and the details of every action it proposes: which app, what it would do, and every value it would send.",
+      "Your publik handle, time zone, and simple usage events (without message content).",
+      "All of this is stored in LooseEnds' database. Your publik install key and any AI key you provide are encrypted there.",
     ],
   ],
   [
     "How your content is processed",
     [
-      "To find tasks and write drafts, your content is sent to the AI model behind your chosen plan: publik API, or the provider of your own key. publik does not train on requests.",
-      "Message content is treated as data. Instructions inside a message can't make LooseEnds do anything.",
-      "Gmail and Google Calendar are optional. If you connect them (through Composio), LooseEnds reads recent inbox mail when you ask it to check, and sends a reply or adds an event only after you confirm that exact preview. You can disconnect in Settings.",
+      "To find tasks, write drafts and answer your questions, your content is sent to the AI model behind your chosen plan: through publik API, or to the provider of your own key. publik does not train on requests.",
+      "Message content is treated as data, not instructions. Text inside an email can try to mislead the AI, so anything that changes something outside LooseEnds always waits for your approval, and the card shows exactly what will be sent.",
+    ],
+  ],
+  [
+    "Connected apps",
+    [
+      `You can connect ${APPS}. Every connection is optional.`,
+      "Connections are made and held by Composio, which stores the access each app grants. LooseEnds does not see or keep your passwords.",
+      "LooseEnds reads a connected app when you ask it something or ask it to check your inbox. It sends, posts, creates, changes or deletes something in a connected app only after you approve that exact action.",
+      "You can disconnect any app in Settings.",
     ],
   ],
   [
     "Deleting your data",
     [
       "Delete a task, or delete a source to remove it together with every task found in it.",
-      "Settings → Delete everything removes your data from LooseEnds' database and signs out your browsers.",
+      "Settings → Delete everything removes your data from LooseEnds' database, disconnects your connected apps, and signs out your browsers.",
     ],
   ],
   [
@@ -59,8 +71,10 @@ export default function Privacy() {
         LooseEnds is open source.{" "}
         <a className="text-accent-text underline underline-offset-2" href="https://github.com/jibberswrld/looseends">
           Read the code
-        </a>{" "}
-        or <Link className="text-accent-text underline underline-offset-2" href="/">go back home</Link>.
+        </a>
+        .{" "}
+        Read the <Link className="text-accent-text underline underline-offset-2" href="/terms">terms</Link>, or{" "}
+        <Link className="text-accent-text underline underline-offset-2" href="/">go back home</Link>.
       </p>
     </div>
   );
