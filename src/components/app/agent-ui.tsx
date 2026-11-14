@@ -289,21 +289,71 @@ const LONG = new Set(["body", "text", "message", "markdown_text", "content", "de
 const HIDDEN = /(^|_)(id|ids|url|uri|token|key|type|format|timezone)$/i;
 const ISO = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
 
-function fieldsOf(args: Record<string, unknown>): Field[] {
+/** Everything the model sent, split in two: readable fields to show and edit, and the rest (ids, urls, numbers, nested data). */
+function fieldsOf(args: Record<string, unknown>): { fields: Field[]; rest: [string, unknown][] } {
   const out: Field[] = [];
+  const rest: [string, unknown][] = [];
   for (const [key, v] of Object.entries(args)) {
-    if (HIDDEN.test(key)) continue;
     const list = Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === "string");
-    if (typeof v !== "string" && !list) continue;
-    const value = list ? (v as string[]).join(", ") : (v as string);
-    if (!value.trim()) continue;
+    const value = list ? (v as string[]).join(", ") : typeof v === "string" ? v : "";
+    if (HIDDEN.test(key) || (typeof v !== "string" && !list) || !value.trim()) {
+      rest.push([key, v]);
+      continue;
+    }
     const label = LABELS[key] ?? (key.charAt(0).toUpperCase() + key.slice(1)).replace(/_/g, " ");
     const kind = list ? "list" : ISO.test(value) ? "date" : "text";
     out.push({ key, label, value, kind, long: kind === "text" && (LONG.has(key) || value.length > 90 || value.includes("\n")) });
   }
   // Short fields in the order a person reads them (To, Cc, Subject...), whatever order the model sent.
   const rank = (k: string) => (k in LABELS ? Object.keys(LABELS).indexOf(k) : Infinity);
-  return [...out.filter((f) => !f.long).sort((a, b) => rank(a.key) - rank(b.key)), ...out.filter((f) => f.long)];
+  return { fields: [...out.filter((f) => !f.long).sort((a, b) => rank(a.key) - rank(b.key)), ...out.filter((f) => f.long)], rest };
+}
+
+const CLIP = 280;
+const raw = (v: unknown) => (typeof v === "string" ? v : (JSON.stringify(v, null, 2) ?? String(v)));
+
+/** One argument exactly as it will be sent. Very long values are clipped until asked for. */
+function RawValue({ name, value }: { name: string; value: unknown }) {
+  const [all, setAll] = useState(false);
+  const text = raw(value);
+  const long = text.length > CLIP;
+  return (
+    <div className="py-2">
+      <dt className="font-mono text-[12px] text-muted">{name}</dt>
+      <dd className="mt-0.5 min-w-0">
+        <pre className="font-mono text-[12.5px] leading-[1.55] whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">
+          {long && !all ? `${text.slice(0, CLIP)}…` : text || '""'}
+        </pre>
+        {long ? (
+          <button onClick={() => setAll((v) => !v)} className="mt-1 text-[12px] font-medium text-accent-text underline underline-offset-2">
+            {all ? "Show less" : `Show all ${text.length.toLocaleString()} characters`}
+          </button>
+        ) : null}
+      </dd>
+    </div>
+  );
+}
+
+/** Ids, links, numbers and nested data the action also sends. Collapsed, but never left off the card. */
+function Details({ rest }: { rest: [string, unknown][] }) {
+  const names = rest.map(([k]) => k);
+  return (
+    <details className="group mx-3 mt-2 rounded-[9px] border border-line bg-surface px-3.5">
+      <summary className="flex cursor-pointer list-none items-center gap-2 py-2 text-[13px] text-muted transition-colors duration-150 hover:text-ink [&::-webkit-details-marker]:hidden">
+        <CaretDown size={11} weight="bold" className="shrink-0 -rotate-90 transition-transform duration-150 group-open:rotate-0" />
+        <span className="font-medium text-ink-2">Details</span>
+        <span className="min-w-0 truncate font-mono text-[12px]">
+          {names.slice(0, 3).join(", ")}
+          {names.length > 3 ? ` +${names.length - 3}` : ""}
+        </span>
+      </summary>
+      <dl className="divide-y divide-line border-t border-line">
+        {rest.map(([k, v]) => (
+          <RawValue key={k} name={k} value={v} />
+        ))}
+      </dl>
+    </details>
+  );
 }
 
 const STOP = new Set(["to", "in", "on", "for", "a", "an", "the", "with", "at", "from", "into", "about", "and", "as"]);
@@ -424,7 +474,7 @@ function AutoTextarea({ value, onChange, disabled, label }: { value: string; onC
 /** A change to the outside world, shown as it will go out. Edit the text, then approve it by name. */
 export function ActionCard({ action }: { action: AgentAction }) {
   const { decide, busy } = useAgent();
-  const fields = fieldsOf(action.args);
+  const { fields, rest } = fieldsOf(action.args);
   const [edits, setEdits] = useState<Record<string, string>>({});
   const pending = action.status === "pending";
   const val = (f: Field) => edits[f.key] ?? f.value;
@@ -480,8 +530,9 @@ export function ActionCard({ action }: { action: AgentAction }) {
           ))}
         </div>
       ) : null}
+      {rest.length && action.status !== "cancelled" ? <Details rest={rest} /> : null}
 
-      <footer className={cx("flex flex-wrap items-center gap-2 px-4 pb-3.5", fields.length && action.status !== "cancelled" ? "pt-3" : "pt-0")}>
+      <footer className={cx("flex flex-wrap items-center gap-2 px-4 pb-3.5", (fields.length || rest.length) && action.status !== "cancelled" ? "pt-3" : "pt-0")}>
         {pending || action.status === "running" ? (
           <>
             <Button
