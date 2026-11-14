@@ -1,3 +1,4 @@
+import { checkDeadline } from "./deadline";
 import { createHash } from "node:crypto";
 import type { CaptureResult, SourceKind, Task } from "@/lib/types";
 import { AiRequestError, resolveProvider } from "./ai";
@@ -77,6 +78,7 @@ export async function capture(ctx: Ctx, input: CaptureInput): Promise<CaptureRes
     }
   }
 
+  checkDeadline();
   const provider = resolveProvider(session, user);
   const now = new Date();
   const messages = buildMessages(
@@ -104,11 +106,14 @@ export async function capture(ctx: Ctx, input: CaptureInput): Promise<CaptureRes
   const classification = realTasks.length > 0 ? "obligations"
     : ex.classification === "promotional" || ex.tasks.length > 0 ? "promotional" : "no_action";
 
+  checkDeadline();
   const src = (await sql`
     insert into sources (user_id, kind, title, content, content_hash, classification, summary, injection_detected, external_id, thread_id, sender, sender_address)
     values (${user.id}, ${input.kind}, ${title}, ${content}, ${hash}, ${classification}, ${ex.summary}, ${ex.injection_detected},
       ${input.gmail?.externalId ?? null}, ${input.gmail?.threadId ?? null}, ${input.gmail?.from ?? null}, ${input.gmail?.address ?? null})
+    on conflict (user_id, external_id) where external_id is not null do nothing
     returning *`)[0];
+  if (!src) return { outcome: "duplicate_source", source: null, tasks: [], duplicateOf: null, message: "This email has already been imported." };
 
   const open = await sql`select id, title, evidence_quote from tasks where user_id = ${user.id} and status not in ('completed', 'dismissed') and (source_id is null or source_id <> ${src.id})`;
   const inserted: Row[] = [];

@@ -1,3 +1,4 @@
+import { checkDeadline, turnSignal } from "./deadline";
 import type { ScanEvent } from "@/lib/types";
 import { capture } from "./capture";
 import { connectorRun } from "./connector";
@@ -7,7 +8,7 @@ import type { Ctx } from "./session";
 import { track } from "./track";
 
 const QUERY = "in:inbox newer_than:7d -category:promotions -category:social -category:forums";
-const MAX_EMAILS = 15;
+const MAX_EMAILS = 5;
 const BODY_LIMIT = 8_000;
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", "#39": "'" };
@@ -27,17 +28,30 @@ function plainText(s: string): string {
 
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
-/** One scan at a time per person: a second click must not pay for the same emails twice. */
-const running = new Set<string>();
-
 /** POST /api/inbox/scan: read recent inbox mail and run each new message through the capture pipeline. */
 export async function* scanInbox(ctx: Ctx): AsyncGenerator<ScanEvent> {
+  const signal = turnSignal.getStore() ?? AbortSignal.timeout(240_000);
+  const events = scanInboxWork(ctx);
+  try {
+    while (true) {
+      const next = await turnSignal.run(signal, () => events.next());
+      if (next.done) return;
+      yield next.value;
+    }
+  } finally {
+    await events.return(undefined);
+  }
+}
+
+async function* scanInboxWork(ctx: Ctx): AsyncGenerator<ScanEvent> {
   const { user, session } = ctx;
-  if (running.has(user.id)) {
+  checkDeadline();
+  const lease = (await sql`update users set scan_started_at = date_trunc('milliseconds', clock_timestamp()) where id = ${user.id}
+    and (scan_started_at is null or scan_started_at < now() - interval '5 minutes') returning scan_started_at`)[0];
+  if (!lease) {
     yield { type: "error", code: "scan_in_progress", message: "LooseEnds is already checking your inbox." };
     return;
   }
-  running.add(user.id);
   try {
     yield { type: "step", text: "Opening your inbox" };
     const r = await connectorRun("GMAIL_FETCH_EMAILS", { query: QUERY, max_results: MAX_EMAILS, include_payload: true, verbose: true });
@@ -52,6 +66,7 @@ export async function* scanInbox(ctx: Ctx): AsyncGenerator<ScanEvent> {
     const tz: string = user.timezone || "UTC";
     let scanned = 0, found = 0, skipped = 0;
     for (const m of emails) {
+      checkDeadline();
       const id = str(m.messageId);
       const rawSender = str(m.sender) || "Unknown sender";
       const from = rawSender.replace(/\s*<[^>]+>\s*$/, "").replace(/^"|"$/g, "").trim() || rawSender;
@@ -94,6 +109,6 @@ export async function* scanInbox(ctx: Ctx): AsyncGenerator<ScanEvent> {
     await track("inbox_scanned", { userId: user.id, sessionId: session.id, props: { scanned, found } });
     yield { type: "done", scanned, found, skipped };
   } finally {
-    running.delete(user.id);
+    await sql`update users set scan_started_at = null where id = ${user.id} and scan_started_at = ${lease.scan_started_at}`;
   }
 }
