@@ -70,10 +70,14 @@ export function Composer({ hasTasks, onOpenTask }: { hasTasks: boolean; onOpenTa
   const send = () => {
     if (!canSend) return;
     const t = text.trim();
-    if (file) void w.capture({ text: t, file, label: `Read ${file.name}` });
-    else void agent.send(t);
+    // A file is read on its own; anything typed stays in the box to send next.
+    if (file) {
+      void w.capture({ file, label: `Read ${file.name}` });
+      setFile(null);
+      return;
+    }
+    void agent.send(t);
     setText("");
-    setFile(null);
   };
 
   return (
@@ -117,7 +121,7 @@ export function Composer({ hasTasks, onOpenTask }: { hasTasks: boolean; onOpenTa
               send();
             }
           }}
-          placeholder={file ? "Add a note about this file (optional)" : talking ? "Reply, or ask for something else" : "Ask about your inbox, or tell me what to do"}
+          placeholder={file ? "Send to find the to-dos in this file" : talking ? "Reply, or ask for something else" : "Ask about your inbox, or tell me what to do"}
           className="block w-full resize-none bg-transparent px-5 pt-4 text-[15.5px] leading-relaxed text-ink outline-none placeholder:text-muted"
         />
         {file ? (
