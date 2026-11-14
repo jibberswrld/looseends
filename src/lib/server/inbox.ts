@@ -9,6 +9,7 @@ import { track } from "./track";
 
 const QUERY = "in:inbox newer_than:7d -category:promotions -category:social -category:forums";
 const MAX_EMAILS = 5;
+const MAX_EXAMINED = 50;
 const BODY_LIMIT = 8_000;
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", "#39": "'" };
@@ -54,56 +55,68 @@ async function* scanInboxWork(ctx: Ctx): AsyncGenerator<ScanEvent> {
   }
   try {
     yield { type: "step", text: "Opening your inbox" };
-    const r = await connectorRun("GMAIL_FETCH_EMAILS", { query: QUERY, max_results: MAX_EMAILS, include_payload: true, verbose: true });
-    if (!r.ok) {
-      yield { type: "error", code: r.kind === "error" ? r.code : r.kind, message: r.kind === "not_connected" ? "Connect Gmail first." : r.message };
-      return;
-    }
-    const raw = Array.isArray(r.data.data?.messages) ? (r.data.data.messages as Record<string, unknown>[]) : [];
-    const emails = raw.filter((m) => str(m.messageId)).slice(0, MAX_EMAILS);
-    yield { type: "step", text: emails.length === 0 ? "No new emails from the last 7 days" : `Reading ${emails.length} ${emails.length === 1 ? "email" : "emails"}` };
-
     const tz: string = user.timezone || "UTC";
-    let scanned = 0, found = 0, skipped = 0;
-    for (const m of emails) {
+    let scanned = 0, found = 0, skipped = 0, attempted = 0, examined = 0;
+    let pageToken = "";
+    // Bound pages as well as messages: a broken connector may return empty pages with tokens.
+    for (let page = 0; page < MAX_EXAMINED / MAX_EMAILS && examined < MAX_EXAMINED && attempted < MAX_EMAILS; page++) {
       checkDeadline();
-      const id = str(m.messageId);
-      const rawSender = str(m.sender) || "Unknown sender";
-      const from = rawSender.replace(/\s*<[^>]+>\s*$/, "").replace(/^"|"$/g, "").trim() || rawSender;
-      const address = /<([^<>\s]+@[^<>\s]+)>/.exec(rawSender)?.[1] ?? (/^[^\s<>]+@[^\s<>]+$/.test(rawSender) ? rawSender : null);
-      const subject = str(m.subject) || "(no subject)";
-      const seen = await sql`select 1 from sources where user_id = ${user.id} and external_id = ${id} limit 1`;
-      if (seen[0]) {
-        skipped++;
-        yield { type: "email", from, subject, outcome: "duplicate", tasks: [] };
-        continue;
+      const r = await connectorRun("GMAIL_FETCH_EMAILS", {
+        query: QUERY, max_results: MAX_EMAILS, include_payload: true, verbose: true,
+        ...(pageToken ? { page_token: pageToken } : {}),
+      });
+      if (!r.ok) {
+        yield { type: "error", code: r.kind === "error" ? r.code : r.kind, message: r.kind === "not_connected" ? "Connect Gmail first." : r.message };
+        return;
       }
-      const sent = new Date(str(m.messageTimestamp));
-      const date = Number.isNaN(sent.getTime()) ? null : new Intl.DateTimeFormat("en-US", { timeZone: tz, dateStyle: "full", timeStyle: "short" }).format(sent);
-      const preview = m.preview && typeof m.preview === "object" ? str((m.preview as { body?: unknown }).body) : "";
-      const body = (plainText(str(m.messageText)) || preview).slice(0, BODY_LIMIT);
-      const text = `From: ${from}\nSubject: ${subject}\n${date ? `Date: ${date}\n` : ""}\n${body}`;
-      try {
-        const result = await capture(ctx, {
-          kind: "gmail", text, fileName: null, title: from.slice(0, 80), force: false,
-          gmail: { from, address, externalId: id, threadId: str(m.threadId) || null },
-        });
-        if (result.outcome === "duplicate_source") {
+      const emails = Array.isArray(r.data.data?.messages) ? (r.data.data.messages as Record<string, unknown>[]).slice(0, MAX_EMAILS) : [];
+      yield { type: "step", text: emails.length === 0 ? "No new emails from the last 7 days" : `Checking ${emails.length} ${emails.length === 1 ? "email" : "emails"}` };
+      for (const m of emails) {
+        if (attempted >= MAX_EMAILS || examined >= MAX_EXAMINED) break;
+        checkDeadline();
+        examined++;
+        const id = str(m.messageId);
+        if (!id) continue;
+        const rawSender = str(m.sender) || "Unknown sender";
+        const from = rawSender.replace(/\s*<[^>]+>\s*$/, "").replace(/^"|"$/g, "").trim() || rawSender;
+        const address = /<([^<>\s]+@[^<>\s]+)>/.exec(rawSender)?.[1] ?? (/^[^\s<>]+@[^\s<>]+$/.test(rawSender) ? rawSender : null);
+        const subject = str(m.subject) || "(no subject)";
+        const seen = await sql`select 1 from sources where user_id = ${user.id} and external_id = ${id} limit 1`;
+        if (seen[0]) {
           skipped++;
           yield { type: "email", from, subject, outcome: "duplicate", tasks: [] };
           continue;
         }
-        scanned++;
-        if (result.outcome === "tasks") found += result.tasks.filter((t) => !t.isPromotional).length;
-        yield { type: "email", from, subject, outcome: result.outcome, tasks: result.tasks };
-      } catch (e) {
-        // Out of balance, signed out, AI down: stop here. Emails already read stay imported; the rest wait for the next scan.
-        if (!(e instanceof HttpError)) console.error("[scan]", e);
-        yield e instanceof HttpError
-          ? { type: "error", code: e.code, message: e.message, ...(e.topUpUrl ? { topUpUrl: e.topUpUrl } : {}) }
-          : { type: "error", code: "server_error", message: "Something went wrong while reading your inbox. Please try again." };
-        return;
+        const sent = new Date(str(m.messageTimestamp));
+        const date = Number.isNaN(sent.getTime()) ? null : new Intl.DateTimeFormat("en-US", { timeZone: tz, dateStyle: "full", timeStyle: "short" }).format(sent);
+        const preview = m.preview && typeof m.preview === "object" ? str((m.preview as { body?: unknown }).body) : "";
+        const body = (plainText(str(m.messageText)) || preview).slice(0, BODY_LIMIT);
+        const text = `From: ${from}\nSubject: ${subject}\n${date ? `Date: ${date}\n` : ""}\n${body}`;
+        try {
+          attempted++;
+          const result = await capture(ctx, {
+            kind: "gmail", text, fileName: null, title: from.slice(0, 80), force: false,
+            gmail: { from, address, externalId: id, threadId: str(m.threadId) || null },
+          });
+          if (result.outcome === "duplicate_source") {
+            skipped++;
+            yield { type: "email", from, subject, outcome: "duplicate", tasks: [] };
+            continue;
+          }
+          scanned++;
+          if (result.outcome === "tasks") found += result.tasks.filter((t) => !t.isPromotional).length;
+          yield { type: "email", from, subject, outcome: result.outcome, tasks: result.tasks };
+        } catch (e) {
+          // Out of balance, signed out, AI down: stop here. Emails already read stay imported; the rest wait for the next scan.
+          if (!(e instanceof HttpError)) console.error("[scan]", e);
+          yield e instanceof HttpError
+            ? { type: "error", code: e.code, message: e.message, ...(e.topUpUrl ? { topUpUrl: e.topUpUrl } : {}) }
+            : { type: "error", code: "server_error", message: "Something went wrong while reading your inbox. Please try again." };
+          return;
+        }
       }
+      pageToken = str(r.data.data?.nextPageToken);
+      if (!pageToken) break;
     }
     await sql`update users set gmail_last_scan_at = now() where id = ${user.id}`;
     await track("inbox_scanned", { userId: user.id, sessionId: session.id, props: { scanned, found } });

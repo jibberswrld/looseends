@@ -121,8 +121,12 @@ try {
     assert(scans.some((r) => r.data.some((e) => e.code === "scan_in_progress")));
     const scanned = scans.flatMap((r) => r.data).find((e) => e.type === "done"); assert.equal(scanned.scanned, 5);
     extractionDelay = 0;
-    const repeat = await api("/api/inbox/scan", "POST"); assert.equal(repeat.data.find((e) => e.type === "done").skipped, 5);
-    console.log("PASS concurrent inbox scan rejected; five emails imported; repeat skips all five");
+    const beforeRepeat = requests.filter((r) => !r.stream).length;
+    const repeat = await api("/api/inbox/scan", "POST");
+    const repeatDone = repeat.data.find((e) => e.type === "done");
+    assert.equal(repeatDone.skipped, 5); assert.equal(repeatDone.scanned, 1);
+    assert.equal(requests.filter((r) => !r.stream).length - beforeRepeat, 1);
+    console.log("PASS concurrent inbox scan rejected; repeat pages past five imports and extracts message six once");
     for (let i = 0; i < 17; i++) assert.equal((await api("/api/inbox/scan", "POST")).status, 200);
     const limited = await api("/api/inbox/scan", "POST"); assert.equal(limited.status, 429); assert.match(limited.data.error.message, /20 per hour/);
     console.log("PASS scan request 21 returns HTTP 429 with a clear hourly limit");

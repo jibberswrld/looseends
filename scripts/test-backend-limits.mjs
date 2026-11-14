@@ -111,6 +111,42 @@ try {
   for await (const e of scanInbox(ctx)) assert.notEqual(e.type, "error");
   assert.equal(gmailCalls, 1); assert.equal((await sql`select scan_started_at from users where id = ${user.id}`)[0].scan_started_at, null);
   console.log("PASS fresh scan lease blocks work, expired lease recovers and releases");
+  const mail = (i) => ({ messageId: `page-${i}`, sender: "Fixture <fixture@example.test>", subject: `Message ${i}`, messageText: `Unique fixture body ${i}` });
+  let mailbox = Array.from({ length: 60 }, (_, i) => mail(i)), pageCalls = [], extractions = 0, pageMode = "normal";
+  globalThis.fetch = async (input, init) => {
+    if (String(input).endsWith("/run")) {
+      const { arguments: args } = JSON.parse(init.body); pageCalls.push(args);
+      const start = Number(args.page_token || 0);
+      const messages = pageMode === "empty" ? [] : mailbox.slice(start, start + args.max_results);
+      return Response.json({ data: { messages, nextPageToken: pageMode === "empty" ? "same-token" : start + messages.length < mailbox.length ? String(start + messages.length) : "" } });
+    }
+    extractions++;
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ title: "Fixture", classification: "no_action", tasks: [] }) } }] });
+  };
+  const scan = async () => { const events = []; for await (const e of scanInbox(ctx)) events.push(e); assert(!events.some((e) => e.type === "error")); return events.find((e) => e.type === "done"); };
+  assert.equal((await scan()).scanned, 5); assert.equal(extractions, 5); assert.equal(pageCalls.length, 1);
+  pageCalls = []; extractions = 0;
+  const second = await scan(); assert.equal(second.skipped, 5); assert.equal(second.scanned, 5);
+  assert.equal(pageCalls.length, 2); assert.equal(pageCalls[1].page_token, "5"); assert.equal(extractions, 5);
+  assert.equal((await sql`select count(*)::int as n from sources where external_id = 'page-5'`)[0].n, 1);
+  console.log("PASS scan advances beyond five imported messages and makes at most five AI extractions");
+  // Mark the first 50 as imported; message 51 must stay unexamined this scan.
+  for (let i = 10; i < 50; i++) await sql`insert into sources (user_id, kind, title, content, content_hash, external_id) values (${user.id}, 'gmail', 'Seen', 'Seen', ${`seen-${i}`}, ${`page-${i}`})`;
+  pageCalls = []; extractions = 0;
+  const bounded = await scan(); assert.equal(bounded.skipped, 50); assert.equal(bounded.scanned, 0);
+  assert.equal(pageCalls.length, 10); assert.equal(extractions, 0);
+  assert.equal((await sql`select count(*)::int as n from sources where external_id = 'page-50'`)[0].n, 0);
+  pageMode = "empty"; pageCalls = [];
+  assert.equal((await scan()).scanned, 0); assert.equal(pageCalls.length, 10); assert.equal(extractions, 0);
+  console.log("PASS scan stops at 50 examined messages; empty pages with repeating tokens also terminate");
+  // Restore the simple extraction fake used by the remaining timeout/race checks.
+  globalThis.fetch = async (_input, init) => {
+    if (holdAI) return new Promise((_, reject) => {
+      if (init.signal.aborted) reject(init.signal.reason);
+      else init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+    });
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ title: "Fixture", classification: "no_action", tasks: [] }) } }] });
+  };
   const input = { kind: "gmail", text: "Same external message", title: null, fileName: null, force: true, gmail: { from: "Fixture", address: null, externalId: "same-id", threadId: null } };
   const captures = await Promise.all([capture(ctx, input), capture(ctx, input)]);
   assert.equal(captures.filter((r) => r.outcome === "duplicate_source").length, 1);
