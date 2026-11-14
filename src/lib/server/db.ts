@@ -18,7 +18,11 @@ function hostedDb() {
   const client = (g.__looseendsNeon ??= neon(url));
   g.__looseendsSchema ??= (async () => {
     const statements = schema().split("-- statement-breakpoint").map((s) => s.trim()).filter(Boolean);
-    await client.transaction(statements.map((statement) => client.query(statement, [])), { fetchOptions: { signal: AbortSignal.timeout(20_000) } });
+    await client.transaction([
+      // Serialize cold starts before any DDL takes table/index locks. Released on commit or rollback.
+      client.query("select pg_advisory_xact_lock(620915409)", []),
+      ...statements.map((statement) => client.query(statement, [])),
+    ], { fetchOptions: { signal: AbortSignal.timeout(20_000) } });
   })().catch((e) => { g.__looseendsSchema = undefined; throw e; });
   return { client, ready: g.__looseendsSchema };
 }

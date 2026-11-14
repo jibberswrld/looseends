@@ -1,7 +1,9 @@
 // Behavior tests against actual server modules, transpiled into disposable scratch space.
 // Only session context and outbound vendor responses are faked. No .env files are loaded.
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, writeFile, symlink, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdtemp, mkdir, readFile, readdir, writeFile, symlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -12,6 +14,39 @@ const scratch = await mkdtemp(join(tmpdir(), "looseends-limits-"));
 process.env.LOOSEENDS_DATA_DIR = join(scratch, "data");
 const originalFetch = globalThis.fetch, originalTimeout = AbortSignal.timeout;
 let pg;
+
+// Opt-in real PostgreSQL regression: creates and stops its own disposable local cluster.
+async function testPostgres() {
+  const exec = promisify(execFile), cluster = join(scratch, "postgres"), socket = join(scratch, "socket");
+  await mkdir(socket);
+  await exec("initdb", ["-D", cluster, "-A", "trust", "--no-locale", "-E", "UTF8"]);
+  let started = false;
+  try {
+    await exec("pg_ctl", ["-D", cluster, "-l", join(scratch, "postgres.log"), "-o", `-h '' -k '${socket}' -p 54791 -F`, "-w", "start"]);
+    started = true;
+    const psql = (text) => exec("psql", ["-X", "-h", socket, "-p", "54791", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-c", text], { env: { PATH: process.env.PATH }, maxBuffer: 2_000_000 });
+    const ddl = await readFile("db/schema.sql", "utf8");
+    await psql(ddl);
+    await psql(`insert into users (publik_handle) values ('race-fixture');
+      insert into sources (user_id, kind, title, content, content_hash) select id, 'text', 'Fixture', 'Fixture', 'fixture' from users;
+      insert into tasks (user_id, source_id, title) select user_id, id, 'Fixture' from sources;`);
+    // Pause after the early relation locks so all eight cold starts overlap deterministically.
+    const overlapping = ddl.replace('create index if not exists sessions_user_idx on sessions(user_id);', 'create index if not exists sessions_user_idx on sessions(user_id); select pg_sleep(0.1);');
+    const source = await readFile("src/lib/server/db.ts", "utf8");
+    const lock = source.match(/client\.query\("(select pg_advisory_xact_lock\(\d+\))", \[\]\)/)?.[1];
+    assert(lock, "Hosted initialization must acquire the advisory transaction lock");
+    const before = await Promise.allSettled(Array.from({ length: 8 }, () => psql(`begin; ${overlapping} commit;`)));
+    const deadlocks = before.filter((r) => r.status === "rejected" && /deadlock detected/.test(r.reason.stderr)).length;
+    assert(deadlocks > 0, "Expected the unlocked control to reproduce a deadlock");
+    assert(before.every((r) => r.status === "fulfilled" || /deadlock detected/.test(r.reason.stderr)));
+    const after = await Promise.allSettled(Array.from({ length: 8 }, () => psql(`begin; ${lock}; ${overlapping} commit;`)));
+    assert(after.every((r) => r.status === "fulfilled"));
+    console.log(`PASS PostgreSQL 17 populated-schema race: before ${deadlocks}/8 deadlocked; after 8/8 initialized`);
+  } finally {
+    if (started) await exec("pg_ctl", ["-D", cluster, "-m", "fast", "-w", "stop"]);
+  }
+}
+
 try {
   await symlink(resolve("node_modules"), join(scratch, "node_modules"));
   for (const file of await readdir("src/lib/server")) {
@@ -101,6 +136,7 @@ try {
     await assert.rejects(providerFetch({ kind: "own" }, url, { signal: originalTimeout(500) }), (e) => e.code === "invalid_provider_url");
   }
   console.log("PASS hosted own-key HTTP, credentials, loopback, private and link-local rejection");
+  if (process.argv.includes("--postgres")) await testPostgres();
 } finally {
   globalThis.fetch = originalFetch; AbortSignal.timeout = originalTimeout;
   if (pg) await pg.close();
