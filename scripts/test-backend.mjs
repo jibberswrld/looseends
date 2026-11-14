@@ -39,6 +39,18 @@ const fakeAI = createServer(async (req, res) => {
       return json(res, { choices: [{ message: { content: JSON.stringify({ pick: list.filter((e) => /Riverside|Okafor|City Power/.test(e.from)).map((e) => e.id) }) } }] });
     }
     if (extractionDelay) await new Promise((resolve) => setTimeout(resolve, extractionDelay));
+    if (String(b.messages[0].content).startsWith("You write short, clear, polite replies")) {
+      return json(res, { choices: [{ message: { content: JSON.stringify({ to: "frontdesk@riversidedental.com", subject: "Re: Please confirm your cleaning", body: "Hi,\n\nI confirm my cleaning on Thursday. I'll fill in the intake form before my visit.\n\nThanks!" }) } }] });
+    }
+    const source = String(b.messages[1]?.content ?? "");
+    if (source.includes("Please confirm your appointment for Thursday by 3 p.m.")) {
+      // The built-in "Try a sample email" message, answered the way the real extractor does (for screenshots).
+      const now = new Date(), thursday = new Date(now.getTime() + (((4 - now.getUTCDay() + 7) % 7) || 7) * 86_400_000).toISOString().slice(0, 10);
+      return json(res, { choices: [{ message: { content: JSON.stringify({ classification: "obligations", title: "Email from Riverside Dental", summary: "Riverside Dental asks you to confirm Thursday's cleaning and fill in an intake form.", tasks: [
+        { title: "Confirm your Thursday cleaning", next_step_type: "reply", next_step: "Reply to Riverside Dental to confirm", evidence_quote: "Please confirm your appointment for Thursday by 3 p.m.", due_text: "Thursday by 3 p.m.", due_date: thursday, due_time: "15:00", due_kind: "relative", priority: "high", confidence: 0.95, recipient: "frontdesk@riversidedental.com" },
+        { title: "Complete the intake form", next_step_type: "form", next_step: "Fill in the intake form before your visit", evidence_quote: "complete the intake form before your visit", due_text: "before your visit", due_date: null, due_kind: "vague", confidence: 0.9 },
+      ] }) } }] });
+    }
     const extraction = String(b.messages[0].content).includes("own to-do queue")
       ? { answer: "Review your mock task.", task_ids: [] }
       : { title: "Mock email", classification: "obligations", tasks: [{ title: "Review mock message", next_step: "Review the source", evidence_quote: "Please reply to this email to confirm your appointment", confidence: 0.9 }] };

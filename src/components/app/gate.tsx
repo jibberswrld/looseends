@@ -154,17 +154,15 @@ export function Gate({ children }: { children: ReactNode }) {
             <br />
             <span className="text-muted">Nothing done without you.</span>
           </p>
-          <div className="mt-10 flex items-start gap-10">
-            <ul className="max-w-md flex-1 space-y-5 text-[15px] text-pretty text-ink-2">
-              {TRUST.map((t) => (
-                <li key={t.text} className="flex gap-3">
-                  <span className="mt-0.5 shrink-0 text-accent-text">{t.icon}</span>
-                  {t.text}
-                </li>
-              ))}
-            </ul>
-            <Preview className="hidden w-[200px] shrink-0 xl:block" />
-          </div>
+          <ul className="mt-10 max-w-md space-y-5 text-[15px] text-pretty text-ink-2">
+            {TRUST.map((t) => (
+              <li key={t.text} className="flex gap-3">
+                <span className="mt-0.5 shrink-0 text-accent-text">{t.icon}</span>
+                {t.text}
+              </li>
+            ))}
+          </ul>
+          <Preview className="mt-10 hidden max-w-[500px] xl:block" />
         </div>
         <p className="text-xs text-muted">Signing in connects LooseEnds to publik, which provides the AI.</p>
       </aside>
@@ -213,7 +211,7 @@ export function Gate({ children }: { children: ReactNode }) {
                   </li>
                 ))}
               </ul>
-              <Preview className="mx-auto mt-8 w-[min(72%,260px)]" />
+              <Preview className="mt-8" />
             </div>
           ) : null}
           <p className="mt-8 text-[12.5px] text-muted">
@@ -233,17 +231,17 @@ export function Gate({ children }: { children: ReactNode }) {
   );
 }
 
-/** A real screenshot of LooseEnds on a phone: the list it builds and a reply waiting for approval. */
+/** A real screenshot of LooseEnds on a desktop: the list it built from a sample email, and the assistant. */
 function Preview({ className }: { className?: string }) {
   return (
     <div className={className}>
       <Image
-        src="/gate-preview.jpg"
-        alt="LooseEnds on a phone: tasks found in an inbox, and a reply waiting for your approval"
-        width={780}
-        height={1688}
-        sizes="260px"
-        className="h-auto w-full rounded-[22px] border border-line-strong shadow-float"
+        src="/gate-desktop.jpg"
+        alt="LooseEnds on a desktop: two tasks found in an email from a dentist, with the assistant ready below"
+        width={1600}
+        height={1000}
+        sizes="(min-width: 1280px) 500px, 100vw"
+        className="h-auto w-full rounded-xl border border-line-strong shadow-float"
       />
     </div>
   );
