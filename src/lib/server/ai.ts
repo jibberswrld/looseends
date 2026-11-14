@@ -1,7 +1,7 @@
 import { decrypt } from "./crypto";
 import type { Row } from "./db";
 import { HttpError } from "./http";
-import { DEFAULT_BASE_URL, MODELS, readCredential, topUpUrlFrom402 } from "./publik";
+import { DEFAULT_BASE_URL, MODELS, topUpUrlFrom402 } from "./publik";
 import { sessionKey } from "./session";
 
 export const OWN_DEFAULT_BASE_URL = "https://api.openai.com/v1";
@@ -17,13 +17,10 @@ export interface Provider {
 
 /** Which key pays for this request: the publik install key after "Connect your plan", or the user's own key. */
 export function resolveProvider(session: Row, user: Row): Provider {
-  if (process.env.PUBLIK_API_KEY) {
-    return { kind: "publik", baseURL: process.env.PUBLIK_API_BASE_URL ?? DEFAULT_BASE_URL, apiKey: process.env.PUBLIK_API_KEY, model: MODELS.balanced };
-  }
   if (session.ai_choice === "publik") {
     const key = sessionKey(session);
     if (!key) throw new HttpError(401, "gate", "Sign in with publik to continue.");
-    return { kind: "publik", baseURL: readCredential()?.base_url || DEFAULT_BASE_URL, apiKey: key, model: MODELS.balanced };
+    return { kind: "publik", baseURL: session.publik_base_url || DEFAULT_BASE_URL, apiKey: key, model: MODELS.balanced };
   }
   if (session.ai_choice === "own_key" && user.own_key_enc) {
     return { kind: "own", baseURL: user.own_base_url || OWN_DEFAULT_BASE_URL, apiKey: decrypt(user.own_key_enc), model: user.own_model || OWN_DEFAULT_MODEL };

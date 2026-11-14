@@ -12,7 +12,7 @@ It's built for the small stuff that piles up:
 - **Young professionals**: scheduling back-and-forth, renewals, service follow-ups.
 - **Everyone else**: appointments, returns, bills, bookings, the letter on the counter.
 
-No inbox to connect, no automations to build, no API key to paste. Sign in with publik and drop in your first message. It takes about a minute.
+Sign in with publik and drop in your first message. You can connect apps such as Gmail and Google Calendar when you want them.
 
 ## How it works
 
@@ -40,11 +40,11 @@ Your list is waiting: what needs a look, what's overdue, what's due this week. F
 
 - **Every task shows its source.** Tap the quote to see the original message with the exact sentence highlighted.
 - **No invented dates.** "December 3, 2026" is taken as written. "Thursday by 3 p.m." is worked out and shown with a question mark until you confirm it. "Before your visit" is marked *Date unclear*. If a message gives no date, there isn't one.
-- **Drafts, never sends.** Nothing leaves LooseEnds without you pressing send in your own app.
-- **Messages are data, not commands.** If an email tries to give the AI instructions ("ignore previous instructions and…"), LooseEnds flags it and ignores it. There are no outbound actions for a message to trigger.
+- **You approve external actions.** LooseEnds drafts replies and previews connected-app actions before you confirm them.
+- **Messages are data, not commands.** If an email tries to give the AI instructions ("ignore previous instructions and…"), LooseEnds flags it and ignores it.
 - **Duplicates are caught.** Paste the same message twice and it tells you, instead of doubling your list. Similar tasks get a "Merge" suggestion.
 - **Marketing is filtered.** Newsletters and sales emails are recognised as promotions, not obligations.
-- **Your data stays on your computer.** Everything is stored locally. Delete a task, a message, or everything from Settings.
+- **You control your data.** Your list is stored in LooseEnds' database, with keys encrypted. Delete a task, a message, or everything from Settings.
 
 ![The original message with the sentence behind the task highlighted](docs/images/source.jpg)
 
@@ -63,22 +63,13 @@ LooseEnds uses **publik API**, so there's no key to paste: sign in with publik, 
 
 Your content is sent to the AI model only to find tasks and write drafts. publik does not train on requests.
 
-## Install
+## Open LooseEnds
 
-The easiest way is from [LooseEnds on publik](https://publikhq.com/looseends), which installs and starts it for you.
-
-From source (Node.js 22+ and pnpm):
-
-```sh
-pnpm install && pnpm build
-pnpm start          # opens on http://127.0.0.1:3000
-```
-
-No configuration is needed. Data lives in your app-data folder (`~/Library/Application Support/LooseEnds` on macOS, `%APPDATA%\LooseEnds` on Windows).
+Open [LooseEnds](https://looseends-taupe.vercel.app) in your browser or use **Get started** on [publik](https://publikhq.com/looseends). Sign in with publik to begin.
 
 ## For developers
 
-Next.js 16 (App Router), Tailwind CSS v4, Motion, PGlite (embedded Postgres, stored locally) and publik API (`publik-balanced`).
+Next.js 16 (App Router), Tailwind CSS v4, Motion, Neon Postgres (PGlite for local development) and publik API (`publik-balanced`). Hosted configuration uses `DATABASE_URL`, `APP_SECRET`, `COMPOSIO_API_KEY`, and `PUBLIK_APP_TOKEN`; see `.env.example`.
 
 - `src/lib/server/publik.ts`: Sign in with publik, usage counting and publik API (adapted from publik's reference module).
 - `src/lib/server/extract.ts`: task extraction and the server-side date and evidence rules.

@@ -118,7 +118,7 @@ export function Gate({ children }: { children: ReactNode }) {
             </li>
             <li className="flex gap-3">
               <LockSimple size={20} weight="duotone" className="mt-0.5 shrink-0 text-accent" />
-              Your list is stored on this computer, not in the cloud. Delete it any time.
+              Your list is stored in LooseEnds' database. Delete everything from Settings any time.
             </li>
             <li className="flex gap-3">
               <Sparkle size={20} weight="duotone" className="mt-0.5 shrink-0 text-accent" />
@@ -175,7 +175,7 @@ function GateBody({
 
   if (gate.state === "not_configured") {
     return (
-      <Panel title="LooseEnds isn't set up yet" body="This copy of LooseEnds has no publik app token, so it can't sign anyone in. Reinstall it from publik, or add publik-app-token.txt next to package.json." />
+      <Panel title="LooseEnds isn't set up yet" body="LooseEnds has no publik app token configured, so it can't sign anyone in. Please try again later." />
     );
   }
 
@@ -245,7 +245,7 @@ export function OwnKeyForm({
       }}
     >
       <p className="text-[13px] leading-relaxed text-muted">
-        Any OpenAI-compatible API works. The key is encrypted and stored on this computer, and only used for your requests.
+        Any OpenAI-compatible API works. The key is encrypted in LooseEnds' database and only used for your requests.
       </p>
       <div className="space-y-1.5">
         <Label htmlFor="ok-key">API key</Label>

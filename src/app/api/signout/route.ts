@@ -1,12 +1,11 @@
 import { sql } from "@/lib/server/db";
 import { handle, json } from "@/lib/server/http";
-import { writeCredential } from "@/lib/server/publik";
-import { clearCookie } from "@/lib/server/session";
+import { clearCookie, getSession } from "@/lib/server/session";
 
-/** Sign out on this computer: forgets every browser session and this computer's publik key. Data stays with the account. */
+/** Sign out this browser session. Data stays with the account. */
 export const POST = handle(async () => {
-  await sql`delete from sessions`;
-  writeCredential(null);
+  const session = await getSession(false);
+  if (session) await sql`delete from sessions where id = ${session.id}`;
   await clearCookie();
   return json({ ok: true });
 });

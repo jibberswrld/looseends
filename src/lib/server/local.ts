@@ -1,5 +1,4 @@
-// Where LooseEnds keeps its data on this computer. It runs as a local web app (publik "local_web"):
-// every person runs their own copy, so the database and secrets live in their own app-data folder.
+// Local development fallback when DATABASE_URL is unset and the server is not on Vercel.
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
@@ -19,9 +18,8 @@ export function dataDir(): string {
   return dir;
 }
 
-/** A random secret created on first run (mode 0600). APP_SECRET in the environment overrides it. */
+/** A random secret for local development when APP_SECRET is unset. */
 export function localSecret(): string {
-  if (process.env.APP_SECRET && process.env.APP_SECRET.length >= 32) return process.env.APP_SECRET;
   const file = join(dataDir(), "secret.key");
   if (!existsSync(file)) {
     try {

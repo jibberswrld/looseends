@@ -9,7 +9,7 @@ export const POST = handle(async () => {
   const key = s && s.claim_state === "claimed" ? sessionKey(s) : null;
   if (s && key) {
     const due = await sql`update sessions set last_active_session_at = now() where id = ${s.id} and (last_active_session_at is null or last_active_session_at < now() - interval '30 minutes') returning id`;
-    if (due[0]) await sendEvent("active_session", { key });
+    if (due[0]) await sendEvent("active_session", { key, telemetryId: s.telemetry_id, os: s.os });
   }
   return json({ ok: true });
 });

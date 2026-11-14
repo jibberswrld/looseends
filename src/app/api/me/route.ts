@@ -1,4 +1,3 @@
-import { writeCredential } from "@/lib/server/publik";
 import { z } from "zod";
 import type { Me } from "@/lib/types";
 import { OWN_DEFAULT_BASE_URL, OWN_DEFAULT_MODEL, validateOwnKey } from "@/lib/server/ai";
@@ -67,8 +66,6 @@ export const PATCH = handle(async (req: Request) => {
 export const DELETE = handle(async () => {
   const { user } = await requireReady();
   await sql`delete from users where id = ${user.id}`; // cascades to sources, tasks, actions, events, sessions
-  await sql`delete from sessions`;
-  writeCredential(null); // this computer's publik key
   await clearCookie();
   return json({ ok: true });
 });

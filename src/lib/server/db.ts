@@ -1,19 +1,33 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
+import { neon } from "@neondatabase/serverless";
 import { dataDir } from "./local";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export type Row = Record<string, any>;
 
-// Embedded Postgres (PGlite) stored in the app-data folder. One instance per process: a data
-// directory must never be opened twice, so the handle lives on globalThis across module copies.
-const g = globalThis as unknown as { __looseendsDb?: Promise<PGlite> };
+// Share initialization across module copies. PGlite must only open its data directory once.
+const g = globalThis as unknown as { __looseendsDb?: Promise<PGlite>; __looseendsSchema?: Promise<void>; __looseendsNeon?: ReturnType<typeof neon> };
+
+function schema() { return readFileSync(join(process.cwd(), "db", "schema.sql"), "utf8"); }
+
+function hostedDb() {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error("DATABASE_URL is not set");
+  const client = (g.__looseendsNeon ??= neon(url));
+  g.__looseendsSchema ??= (async () => {
+    for (const statement of schema().split(";").map((s) => s.trim()).filter((s) => s && !/^--[^\n]*$/.test(s))) {
+      await client.query(statement, []);
+    }
+  })().catch((e) => { g.__looseendsSchema = undefined; throw e; });
+  return { client, ready: g.__looseendsSchema };
+}
 
 function db(): Promise<PGlite> {
   g.__looseendsDb ??= (async () => {
     const pg = await PGlite.create(join(dataDir(), "db"));
-    await pg.exec(readFileSync(join(process.cwd(), "db", "schema.sql"), "utf8"));
+    await pg.exec(schema());
     return pg;
   })().catch((e) => {
     g.__looseendsDb = undefined;
@@ -30,8 +44,14 @@ export async function sql(strings: TemplateStringsArray, ...values: unknown[]): 
 
 /** Parameterized query with $1..$n placeholders (for dynamic UPDATE column lists). */
 export async function query(text: string, params: unknown[]): Promise<Row[]> {
-  const res = await (await db()).query<Row>(text, params.map(param));
-  return res.rows;
+  const values = params.map(param);
+  if (process.env.DATABASE_URL) {
+    const { client, ready } = hostedDb();
+    await ready;
+    return (await client.query(text, values)) as Row[];
+  }
+  if (process.env.VERCEL) throw new Error("DATABASE_URL must be set on Vercel.");
+  return (await (await db()).query<Row>(text, values)).rows;
 }
 
 /** Arrays become Postgres array literals (for `= any($1::uuid[])`); other objects become JSON. */

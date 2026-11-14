@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { cookies, headers } from "next/headers";
-import { randomToken, sha256 } from "./crypto";
+import { decrypt, randomToken, sha256 } from "./crypto";
 import { sql, type Row } from "./db";
 import { HttpError } from "./http";
-import { installKey, OS, PublikUnreachable, readWallet, writeCredential } from "./publik";
+import { PublikUnreachable, readWallet, type PublikOS } from "./publik";
 import { track } from "./track";
 
 export const COOKIE = "le_sid";
@@ -12,6 +12,18 @@ const WALLET_RECHECK_MS = 10 * 60_000;
 export interface Ctx {
   session: Row;
   user: Row;
+}
+
+export function osFromUA(ua: string): PublikOS {
+  if (/Windows/i.test(ua)) return "windows";
+  if (/Macintosh|Mac OS X|iPhone|iPad|iPod/i.test(ua)) return "macos";
+  return "linux";
+}
+
+export function deviceName(ua: string): string {
+  const browser = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Browser";
+  const os = /iPhone|iPad/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Mac OS X|Macintosh/.test(ua) ? "macOS" : /Linux/.test(ua) ? "Linux" : "web";
+  return `Web browser (${browser} on ${os})`;
 }
 
 /** The current browser session row. With create, makes one (and sets the cookie) when missing. */
@@ -24,12 +36,13 @@ export async function getSession(create: boolean): Promise<Row | null> {
   }
   if (!create) return null;
   const token = randomToken();
+  const ua = (await headers()).get("user-agent") ?? "";
   const rows = await sql`
     insert into sessions (id, install_id, telemetry_id, os)
-    values (${sha256(token)}, ${randomUUID()}, ${randomUUID()}, ${OS})
+    values (${sha256(token)}, ${randomUUID()}, ${randomUUID()}, ${osFromUA(ua)})
     returning *`;
   jar.set(COOKIE, token, {
-    httpOnly: true, sameSite: "lax", secure: false /* served over http://127.0.0.1 only */, path: "/", maxAge: 60 * 60 * 24 * 365,
+    httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 365,
   });
   return rows[0];
 }
@@ -38,9 +51,9 @@ export async function clearCookie() {
   (await cookies()).delete(COOKIE);
 }
 
-/** This computer's publik key (one install per computer, shared by every browser tab). */
-export function sessionKey(_s?: Row): string | null {
-  return installKey();
+/** The encrypted publik install key belongs to this browser session only. */
+export function sessionKey(s: Row): string | null {
+  return s.publik_key_enc ? decrypt(s.publik_key_enc) : null;
 }
 
 /** IANA timezone from the x-timezone header, validated. */
@@ -73,7 +86,7 @@ export async function requireReady(): Promise<Ctx> {
       const r = await readWallet(key);
       if (r.status === 401 || (r.wallet && r.wallet.claim_state !== "claimed")) {
         await sql`update sessions set claim_state = 'anonymous', user_id = null, wallet_checked_at = now() where id = ${session.id}`;
-        if (r.status === 401) writeCredential(null);
+        if (r.status === 401) await sql`update sessions set publik_key_enc = null where id = ${session.id}`;
         gateError();
       }
       await sql`update sessions set wallet_checked_at = now() where id = ${session.id}`;

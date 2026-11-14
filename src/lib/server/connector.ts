@@ -1,11 +1,10 @@
-// Client for the LooseEnds connector service (src/app/api/connector/**, hosted). It holds the Composio key;
-// this computer proves who it is with its publik key. Nothing here ever throws for a connector that is down.
+// Client for this deployment's /api/connector/* routes. Older local installations can still call those routes.
+import { headers } from "next/headers";
 import type { ConnectorApp, Toolkit } from "@/lib/types";
 import type { ConnectorTool } from "./composio";
 import { HttpError } from "./http";
-import { installKey } from "./publik";
+import { getSession, sessionKey } from "./session";
 
-const ORIGIN = (process.env.CONNECTOR_ORIGIN || "https://looseends-taupe.vercel.app").replace(/\/$/, "");
 export const UNAVAILABLE = "App connections aren't available right now. Try again in a moment.";
 
 export type ConnectorResult<T> =
@@ -16,11 +15,14 @@ export type ConnectorResult<T> =
 async function call<T>(path: string, body: unknown | null, timeoutMs = 20_000): Promise<ConnectorResult<T>> {
   const fail = (kind: "unavailable" | "not_connected" | "error", code: string, message: string, maybeDone = false) =>
     ({ ok: false as const, kind, code, message, maybeDone });
-  const key = installKey();
+  const session = await getSession(false);
+  const key = session ? sessionKey(session) : null;
   if (!key) return fail("error", "gate", "Sign in with publik to continue.");
   let res: Response;
   try {
-    res = await fetch(`${ORIGIN}/api/connector/${path}`, {
+    const host = (await headers()).get("host") || "127.0.0.1:3000";
+    const origin = (process.env.CONNECTOR_ORIGIN || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : `http://${host}`)).replace(/\/$/, "");
+    res = await fetch(`${origin}/api/connector/${path}`, {
       method: body === null ? "GET" : "POST",
       headers: { authorization: `Bearer ${key}`, ...(body === null ? {} : { "content-type": "application/json" }) },
       body: body === null ? undefined : JSON.stringify(body),

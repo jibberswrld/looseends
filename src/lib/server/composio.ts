@@ -1,6 +1,4 @@
-// The connector service half of LooseEnds. It runs only where COMPOSIO_API_KEY is set (the hosted deployment),
-// never on a user's computer: the repo is public, so the Composio project key cannot ship with the app.
-// The local app calls /api/connector/* server-to-server with this computer's publik key (see connector.ts).
+// The hosted connector routes hold COMPOSIO_API_KEY. Older local installations still call them directly.
 import { Composio } from "@composio/core";
 import type { ConnectorApp, Toolkit } from "@/lib/types";
 import { sha256 } from "./crypto";
