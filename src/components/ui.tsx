@@ -4,7 +4,7 @@ export function cx(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(" ");
 }
 
-type Variant = "primary" | "secondary" | "ghost" | "danger";
+type Variant = "primary" | "secondary" | "ghost" | "danger" | "destructive";
 type Size = "sm" | "md" | "lg";
 
 const variants: Record<Variant, string> = {
@@ -12,6 +12,8 @@ const variants: Record<Variant, string> = {
   secondary: "bg-surface text-ink border border-line-strong hover:bg-surface-2",
   ghost: "text-ink-2 hover:bg-surface-2 hover:text-ink",
   danger: "text-danger hover:bg-danger-soft",
+  /** Filled red for irreversible actions; while disabled it stays visibly red but quiet. */
+  destructive: "bg-danger text-white hover:bg-danger/90 disabled:bg-danger-soft disabled:text-danger",
 };
 const sizes: Record<Size, string> = {
   sm: "h-8 px-3 text-[13px] gap-1.5",

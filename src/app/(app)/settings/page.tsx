@@ -216,7 +216,7 @@ export default function SettingsPage() {
               onChange={(e) => setConfirmDelete(e.target.value)}
               className="h-9 w-56 rounded-lg border border-line-strong bg-surface px-3 text-[14px] focus:border-danger focus:outline-none"
             />
-            <Button size="sm" className="bg-danger text-white hover:opacity-90" disabled={confirmDelete.trim().toLowerCase() !== "delete"} loading={busy} onClick={() => void deleteAll()}>
+            <Button size="sm" variant="destructive" disabled={confirmDelete.trim().toLowerCase() !== "delete"} loading={busy} onClick={() => void deleteAll()}>
               Delete all my data
             </Button>
           </div>

@@ -33,7 +33,24 @@ const fakeAI = createServer(async (req, res) => {
   const chunks = []; for await (const c of req) chunks.push(c);
   const b = JSON.parse(Buffer.concat(chunks)); requests.push(b);
   if (!b.stream) {
+    if (String(b.messages[0].content).includes("sort a person's recent emails")) {
+      // Inbox triage sees metadata only; this stand-in picks the senders a person is waiting on.
+      const list = JSON.parse(String(b.messages[1].content).match(/<emails>\n([\s\S]*)\n<\/emails>/)[1]);
+      return json(res, { choices: [{ message: { content: JSON.stringify({ pick: list.filter((e) => /Riverside|Okafor|City Power/.test(e.from)).map((e) => e.id) }) } }] });
+    }
     if (extractionDelay) await new Promise((resolve) => setTimeout(resolve, extractionDelay));
+    if (String(b.messages[0].content).startsWith("You write short, clear, polite replies")) {
+      return json(res, { choices: [{ message: { content: JSON.stringify({ to: "frontdesk@riversidedental.com", subject: "Re: Please confirm your cleaning", body: "Hi,\n\nI confirm my cleaning on Thursday. I'll fill in the intake form before my visit.\n\nThanks!" }) } }] });
+    }
+    const source = String(b.messages[1]?.content ?? "");
+    if (source.includes("Please confirm your appointment for Thursday by 3 p.m.")) {
+      // The built-in "Try a sample email" message, answered the way the real extractor does (for screenshots).
+      const now = new Date(), thursday = new Date(now.getTime() + (((4 - now.getUTCDay() + 7) % 7) || 7) * 86_400_000).toISOString().slice(0, 10);
+      return json(res, { choices: [{ message: { content: JSON.stringify({ classification: "obligations", title: "Email from Riverside Dental", summary: "Riverside Dental asks you to confirm Thursday's cleaning and fill in an intake form.", tasks: [
+        { title: "Confirm your Thursday cleaning", next_step_type: "reply", next_step: "Reply to Riverside Dental to confirm", evidence_quote: "Please confirm your appointment for Thursday by 3 p.m.", due_text: "Thursday by 3 p.m.", due_date: thursday, due_time: "15:00", due_kind: "relative", priority: "high", confidence: 0.95, recipient: "frontdesk@riversidedental.com" },
+        { title: "Complete the intake form", next_step_type: "form", next_step: "Fill in the intake form before your visit", evidence_quote: "complete the intake form before your visit", due_text: "before your visit", due_date: null, due_kind: "vague", confidence: 0.9 },
+      ] }) } }] });
+    }
     const extraction = String(b.messages[0].content).includes("own to-do queue")
       ? { answer: "Review your mock task.", task_ids: [] }
       : { title: "Mock email", classification: "obligations", tasks: [{ title: "Review mock message", next_step: "Review the source", evidence_quote: "Please reply to this email to confirm your appointment", confidence: 0.9 }] };
@@ -41,10 +58,12 @@ const fakeAI = createServer(async (req, res) => {
   }
   const last = b.messages.at(-1);
   const user = b.messages.findLast((m) => m.role === "user")?.content ?? "";
-  let calls = [], content = "Mock tool flow completed.";
+  let calls = [], content = user === "What needs a reply?" ? "**Riverside Dental** is waiting on you: they asked you to confirm Thursday's cleaning by replying to their email. I added it to your list." : "Mock tool flow completed.";
   if (b.tool_choice !== "none") {
     if (last.role === "user") {
-      if (user === "test local limits") calls = [tool("create_task", { title: "Approved local task" }), tool("check_inbox", {}), tool("check_inbox", {}), tool("find_todos_in_text", { text: "Please review the mock document." }), tool("create_task", { title: "Must not run" })];
+      if (user === "What needs a reply?") calls = [tool("list_tasks", {}), tool("check_inbox", {})];
+      else if (user.startsWith("test local removals ")) calls = [tool("complete_task", { id: user.split(" ").at(-1) }), tool("dismiss_task", { id: user.split(" ").at(-1) })];
+      else if (user === "test local limits") calls = [tool("create_task", { title: "Approved local task" }), tool("check_inbox", {}), tool("check_inbox", {}), tool("find_todos_in_text", { text: "Please review the mock document." }), tool("create_task", { title: "Must not run" })];
       else if (user === "test long title") calls = [tool("create_task", { title: "T".repeat(121) })];
       else if (user === "test long next step") calls = [tool("create_task", { title: "Short", nextStep: "N".repeat(301) })];
       else if (user === "test boundary task") calls = [tool("create_task", { title: "T".repeat(120), nextStep: "N".repeat(300) })];
@@ -110,55 +129,55 @@ try {
     assert(approvals.some((r) => r.data.some((e) => e.type === "action" && e.action.status === "done")));
     assert.equal((await (await fetch(`${connector}/mock/calls`)).json()).calls.length, 1);
     console.log("PASS connected write waits for approval; racing approvals execute once");
-    const before = await api("/api/tasks");
-    const local = await api("/api/agent", "POST", { message: "test local limits" });
-    const localActions = local.data.filter((e) => e.type === "action").map((e) => e.action);
-    assert.equal(localActions.length, 3); assert.equal(localActions.filter((a) => a.tool === "LOOSEENDS_LOCAL_check_inbox").length, 1);
-    assert.deepEqual((await api("/api/tasks")).data, before.data);
-    const created = localActions.find((a) => a.tool === "LOOSEENDS_LOCAL_create_task");
-    const localApproval = await api(`/api/agent/actions/${created.id}`, "POST", { decision: "approve" });
-    assert(localApproval.data.some((e) => e.type === "action" && e.action.status === "done"));
-    console.log("PASS four-call round cap, one inbox proposal per turn, local writes require approval");
     const tasksBeforeInvalid = (await api("/api/tasks")).data;
     for (const [message, limit] of [["test long title", 120], ["test long next step", 300]]) {
       const result = await api("/api/agent", "POST", { message });
-      assert(!result.data.some((e) => e.type === "action"));
+      assert(!result.data.some((e) => e.type === "action" || e.type === "tasks"));
       const feedback = requests.at(-1).messages.findLast((m) => m.role === "tool");
       assert.match(feedback.content, new RegExp(`${limit} characters or fewer`));
     }
+    assert.deepEqual((await api("/api/tasks")).data, tasksBeforeInvalid);
     const boundary = await api("/api/agent", "POST", { message: "test boundary task" });
-    const card = boundary.data.find((e) => e.type === "action").action;
-    assert.equal(card.args.title.length, 120); assert.equal(card.args.nextStep.length, 300);
-    for (const args of [{ title: "T".repeat(121) }, { nextStep: "N".repeat(301) }]) {
-      const rejected = await api(`/api/agent/actions/${card.id}`, "POST", { decision: "approve", args });
-      assert(rejected.data.some((e) => e.type === "error" && e.code === "invalid_request" && /characters or fewer/.test(e.message)));
-      const history = await api("/api/agent");
-      const stillPending = history.data.messages.flatMap((m) => m.actions).find((a) => a.id === card.id);
-      assert.equal(stillPending.status, "pending"); assert.deepEqual(stillPending.args, card.args);
-      assert.deepEqual((await api("/api/tasks")).data, tasksBeforeInvalid);
-    }
-    const approvedBoundary = await api(`/api/agent/actions/${card.id}`, "POST", { decision: "approve" });
-    const savedTask = approvedBoundary.data.find((e) => e.type === "tasks").tasks[0];
-    assert.equal(savedTask.title, card.args.title); assert.equal(savedTask.nextStep, card.args.nextStep);
-    const editable = await api("/api/agent", "POST", { message: "test boundary task" });
-    const editCard = editable.data.find((e) => e.type === "action").action;
-    const edited = { title: " " + "E".repeat(118) + " ", nextStep: " " + "S".repeat(298) + " " };
-    const editApproval = await api(`/api/agent/actions/${editCard.id}`, "POST", { decision: "approve", args: edited });
-    const editedTask = editApproval.data.find((e) => e.type === "tasks").tasks[0];
-    assert.equal(editedTask.title, edited.title); assert.equal(editedTask.nextStep, edited.nextStep);
-    console.log("PASS overlong proposals tell the model to shorten; overlong edits stay pending; boundary task and valid edits save exactly as approved");
+    assert(!boundary.data.some((e) => e.type === "action"));
+    const savedTask = boundary.data.find((e) => e.type === "tasks").tasks[0];
+    assert.equal(savedTask.title, "T".repeat(120)); assert.equal(savedTask.nextStep, "N".repeat(300));
+    console.log("PASS overlong task proposals tell the model to shorten and save nothing; a boundary-length task saves exactly");
     extractionDelay = 150;
     const scans = await Promise.all([api("/api/inbox/scan", "POST"), api("/api/inbox/scan", "POST")]);
     assert(scans.some((r) => r.data.some((e) => e.code === "scan_in_progress")));
-    const scanned = scans.flatMap((r) => r.data).find((e) => e.type === "done"); assert.equal(scanned.scanned, 5);
+    const scanned = scans.flatMap((r) => r.data).find((e) => e.type === "done");
+    assert.equal(scanned.scanned, 25); assert.equal(scanned.found, 3);
+    assert.equal(scanned.summary, "Checked 25 recent emails: 3 new to-dos, 22 with nothing to do.");
+    assert.equal(requests.filter((r) => !r.stream && String(r.messages[0].content).includes("sort a person's recent emails")).length, 1);
+    assert.deepEqual(scans.flatMap((r) => r.data).filter((e) => e.type === "email").map((e) => e.from), ["Riverside Dental", "Maya Okafor", "City Power & Light"]);
     extractionDelay = 0;
     const beforeRepeat = requests.filter((r) => !r.stream).length;
     const repeat = await api("/api/inbox/scan", "POST");
     const repeatDone = repeat.data.find((e) => e.type === "done");
-    assert.equal(repeatDone.skipped, 5); assert.equal(repeatDone.scanned, 1);
-    assert.equal(requests.filter((r) => !r.stream).length - beforeRepeat, 1);
-    console.log("PASS concurrent inbox scan rejected; repeat pages past five imports and extracts message six once");
-    for (let i = 0; i < 17; i++) assert.equal((await api("/api/inbox/scan", "POST")).status, 200);
+    assert.equal(repeatDone.skipped, 25); assert.equal(repeatDone.scanned, 0); assert.equal(repeatDone.summary, "No new emails to check.");
+    assert.equal(requests.filter((r) => !r.stream).length - beforeRepeat, 0);
+    console.log("PASS concurrent inbox scan rejected; 25 mock emails, one triage call, three real obligations read; repeat finds nothing new");
+    const before = (await api("/api/tasks")).data.tasks;
+    const local = await api("/api/agent", "POST", { message: "test local limits" });
+    assert(!local.data.some((e) => e.type === "action"), "Adding tasks, finding to-dos and checking the inbox run without approval cards");
+    const created = local.data.filter((e) => e.type === "tasks").flatMap((e) => e.tasks);
+    assert(created.some((t) => t.title === "Approved local task")); assert(!created.some((t) => t.title === "Must not run"));
+    assert(created.some((t) => t.title === "Review mock message"), "find_todos_in_text ran through the capture pipeline");
+    const feedback = requests.findLast((r) => r.stream && r.messages.some((m) => m.role === "tool")).messages.filter((m) => m.role === "tool").map((m) => m.content).join("\n");
+    assert.match(feedback, /only be checked once per turn/); assert.match(feedback, /Only four tool calls/); assert.match(feedback, /No new emails to check/);
+    const refreshed = local.data.find((e) => e.type === "connections");
+    assert(refreshed && refreshed.connections.gmail.lastScanAt, "An agent inbox check refreshes the last-checked time");
+    assert.equal((await api("/api/tasks")).data.tasks.length, before.length + created.length);
+    console.log("PASS create_task, check_inbox and find_todos_in_text run at once; round cap and one inbox check per turn hold; last-checked refreshes");
+    const target = created.find((t) => t.title === "Approved local task");
+    const removal = await api("/api/agent", "POST", { message: `test local removals ${target.id}` });
+    const removalCards = removal.data.filter((e) => e.type === "action").map((e) => e.action);
+    assert.deepEqual(removalCards.map((a) => [a.tool, a.status]), [["LOOSEENDS_LOCAL_complete_task", "pending"], ["LOOSEENDS_LOCAL_dismiss_task", "pending"]]);
+    assert.equal((await api("/api/tasks")).data.tasks.find((t) => t.id === target.id).status, "reviewed");
+    const completed = await api(`/api/agent/actions/${removalCards[0].id}`, "POST", { decision: "approve" });
+    assert.equal(completed.data.find((e) => e.type === "tasks").tasks[0].status, "completed");
+    console.log("PASS complete_task and dismiss_task still wait for approval and only change the task once approved");
+    for (let i = 0; i < 16; i++) assert.equal((await api("/api/inbox/scan", "POST")).status, 200);
     const limited = await api("/api/inbox/scan", "POST"); assert.equal(limited.status, 429); assert.match(limited.data.error.message, /20 per hour/);
     console.log("PASS scan request 21 returns HTTP 429 with a clear hourly limit");
     const ownURL = await api("/api/me", "PATCH", { ownKey: { baseUrl: "https://127.0.0.1/v1", apiKey: randomUUID() } });

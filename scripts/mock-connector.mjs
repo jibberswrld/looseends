@@ -72,8 +72,24 @@ function message(id, threadId, sender, subject, hoursAgo, body) {
   };
 }
 
+/** Newest-first filler, like a real inbox: newsletters and notifications above the mail that needs you. */
+const NOISE = [
+  ["Product Hunt Daily <hello@digest.producthunt.example>", "Today's top 5 launches"], ["Medium Daily Digest <noreply@medium.example>", "Stories picked for you"],
+  ["Spotify <no-reply@spotify.example>", "Your weekly mixtape is here"], ["LinkedIn <notifications@linkedin.example>", "You appeared in 9 searches this week"],
+  ["Amazon <shipment-tracking@amazon.example>", "Your package has shipped"], ["Duolingo <hello@duolingo.example>", "Keep your streak going!"],
+  ["The Morning Brief <news@morningbrief.example>", "Markets, weather and the day ahead"], ["Uber Receipts <receipts@uber.example>", "Your Thursday evening trip"],
+  ["GitHub <noreply@github.example>", "[looseends] CI run passed"], ["Figma <announcements@figma.example>", "New in Figma this month"],
+  ["Nike <news@nike.example>", "Members get early access this weekend"], ["Google <no-reply@accounts.google.example>", "Security alert: new sign-in on Mac"],
+  ["Substack <no-reply@substack.example>", "New post from Field Notes"], ["DoorDash <no-reply@doordash.example>", "$5 off your next order"],
+  ["Calm <hello@calm.example>", "Your daily calm is ready"], ["Venmo <venmo@venmo.example>", "You received a payment"],
+  ["Strava <no-reply@strava.example>", "Your weekly training summary"], ["Zillow <alerts@zillow.example>", "3 new homes match your search"],
+  ["Netflix <info@netflix.example>", "New arrivals you might like"],
+];
+
 function inbox() {
   return [
+    ...NOISE.map(([sender, subject], i) => message(`19a8d0${String(i).padStart(10, "0")}`, `19a8d0${String(i).padStart(10, "0")}`, sender, subject, 0.5 + i * 0.1,
+      `${subject}.\n\nThis is an automated message. Manage your email preferences or unsubscribe at any time.`)),
     message("19a8c1f0e2b34a01", "19a8c1f0e2b34a01", "Riverside Dental <frontdesk@riversidedental.example>", "Please confirm your cleaning appointment", 3,
       `Hi,\n\nThis is a reminder that you have a cleaning with Dr. Patel on ${longDate(day(6))} at 2:30 PM.\n\nPlease reply to this email to confirm your appointment by ${longDate(day(3))}, or call us at 555-0142 if you need to reschedule.\n\nThank you,\nRiverside Dental front desk`),
     message("19a8b77d5c109b02", "19a8b77d5c109b02", "Maya Okafor <maya.okafor@lincolnmiddle.example>", "Field trip permission form", 20,

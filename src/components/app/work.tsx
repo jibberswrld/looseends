@@ -169,7 +169,7 @@ export function WorkProvider({ children }: { children: ReactNode }) {
               say("skip", `${ev.subject || "(no subject)"}`, { sub: `${senderName(ev.from) ?? ev.from} · ${why}` });
             }
           } else if (ev.type === "done") {
-            say("done", ev.found ? `Found ${ev.found} ${ev.found === 1 ? "thing" : "things"} to do in ${ev.scanned} emails` : `Read ${ev.scanned} emails. Nothing new needs you.`);
+            say("done", ev.summary);
             void refreshConnections();
           } else if (ev.type === "error") say("error", ev.message, { topUpUrl: ev.topUpUrl ?? null });
         };

@@ -39,10 +39,7 @@ Connecting apps is optional. LooseEnds can connect **Gmail, Google Calendar, Out
 - **Duplicates are caught**, and newsletters and sales emails are recognised as promotions, not obligations.
 - **You control your data.** Delete a task, a message, or everything from Settings. Delete everything also disconnects your apps. See the [privacy page](https://looseends-taupe.vercel.app/privacy) and [terms](https://looseends-taupe.vercel.app/terms).
 
-<p>
-  <img src="docs/images/gate.jpg" alt="The LooseEnds sign-in page" width="68%">
-  <img src="docs/images/mobile.jpg" alt="LooseEnds on a phone" width="28%">
-</p>
+![The LooseEnds sign-in page](docs/images/gate.jpg)
 
 ## AI and pricing
 

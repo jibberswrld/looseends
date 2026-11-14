@@ -227,7 +227,7 @@ export type AgentEvent =
 export type ScanEvent =
   | { type: "step"; text: string } // "Opening your inbox", "Reading 12 unread emails"
   | { type: "email"; from: string; subject: string; outcome: "tasks" | "promotional" | "no_action" | "duplicate"; tasks: Task[] }
-  | { type: "done"; scanned: number; found: number; skipped: number }
+  | { type: "done"; scanned: number; found: number; skipped: number; summary: string } // summary: "Checked 25 recent emails: 1 new to-do, 24 with nothing to do."
   | { type: "error"; code: string; message: string; topUpUrl?: string | null };
 
 // POST /api/actions/:id/send {confirm: true} -> { task }
