@@ -1,11 +1,11 @@
-// Local stand-in for the LooseEnds connector service (src/app/api/connector/**), for end-to-end tests without
+// Local-only stand-in for the server connector functions, for end-to-end tests without
 // Composio or a real Google account. Run: node scripts/mock-connector.mjs
 // Then start the app with CONNECTOR_ORIGIN=http://localhost:4666.
-// Same connector routes as the real service, state in memory.
+// Accepts session-derived x-mock-user identities; state stays in memory.
 // Extras: GET /mock-connect/<toolkit>?user=<id> ("signs in with Google"), GET /mock/calls (every write it was asked
 // to do), GET /mock/fail/on|off (make the next runs fail), GET /mock/reset. Never used in production.
 import { createServer } from "node:http";
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 
 const PORT = Number(process.env.MOCK_CONNECTOR_PORT || 4666);
 const ORIGIN = `http://localhost:${PORT}`;
@@ -28,7 +28,7 @@ const TOOLS = [
   ["NOTION_SEARCH", "notion", "Search Notion", true, { query: { type: "string" } }],
   ["TODOIST_CREATE_TASK", "todoist", "Create Todoist task", false, { content: { type: "string" } }],
 ];
-const metadata = ([slug, toolkit, name, readOnly, properties]) => ({ slug, toolkit, name, description: name, readOnly, parameters: { type: "object", properties } });
+const metadata = ([slug, toolkit, name, readOnly, properties]) => ({ slug, toolkit, name, description: name, readOnly, parameters: { type: "object", properties, required: Object.keys(properties) } });
 
 const connected = new Map(); // user -> Set<toolkit>
 let calls = []; // { tool, user, arguments, at, id }
@@ -48,11 +48,8 @@ const readBody = (req) => new Promise((resolve) => {
 });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const hex = (n) => randomBytes(n).toString("hex");
-/** Like the real service: one user per publik key. */
-const userOf = (req) => {
-  const m = /^Bearer (pk_\S+)$/.exec(req.headers.authorization || "");
-  return m ? createHash("sha256").update(m[1]).digest("hex").slice(0, 16) : null;
-};
+/** The local server receives a session-derived identity, never an install key. */
+const userOf = (req) => /^looseends_[a-zA-Z0-9_-]+$/.test(req.headers["x-mock-user"] || "") ? req.headers["x-mock-user"] : null;
 const toolkitsOf = (user) => connected.get(user) ?? connected.set(user, new Set()).get(user);
 
 // ---------- the fake inbox ----------
@@ -157,6 +154,11 @@ createServer(async (req, res) => {
     if (req.method !== "POST") return error(res, 404, "not_found", "not found");
     const body = await readBody(req);
 
+    if (path === "/api/connector/disconnect-all") {
+      if (failing) return error(res, 502, "connector_error", "Mock disconnect failed.");
+      mine.clear();
+      return send(res, 200, { ok: true });
+    }
     if (path === "/api/connector/link" || path === "/api/connector/disconnect") {
       if (!APPS.some(([slug]) => slug === body.toolkit)) return error(res, 400, "invalid_request", "Unsupported app.");
       if (path.endsWith("/link")) return send(res, 200, { url: `${ORIGIN}/mock-connect/${body.toolkit}?user=${user}` });
