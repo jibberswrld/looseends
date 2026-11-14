@@ -12,9 +12,17 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - Base URL: https://publikhq.com/api/v1 (OpenAI Chat Completions, Responses, Anthropic Messages)
 - Models: publik-fast, publik-balanced, publik-smart only; never a vendor model name
 - Sign in with publik: the gate (`src/lib/server/gate.ts`, UI `src/components/app/gate.tsx`) runs before any app screen; it also sends usage telemetry (`src/lib/server/publik.ts`)
+- Gate: GET /api/gate never creates anything (cookieless visitors get the sign-in screen); POST /api/gate, sent when "Sign in with publik" is clicked, creates the session row and the publik install. The client polls GET every 3 s for a minute, then every 10 s, for at most 10 minutes
 - Key: one `pk_` from POST /installs per browser session, encrypted in the `sessions` row; never sent to the browser
 - App token: publik-app-token.txt (public by design, committed) or PUBLIK_APP_TOKEN
 - Runs as a hosted web app on Vercel; Neon Postgres with `DATABASE_URL`, PGlite only for local development/tests
 - 402: show error.message plus error.top_up_url only
+- Errors: API routes answer `{error:{code,message}}`; the client (`src/components/app/api.ts`) shows `message` as is (429 included) and maps non-JSON 413/429/5xx to plain sentences
+- Agent writes are approval cards (`src/components/app/agent-ui.tsx`): every argument must be visible on the card (readable fields, the rest under Details). Never hide an argument that will be sent
+- Connected apps (Composio): Gmail, Google Calendar, Outlook, Slack, Notion, Google Drive, Google Docs, Google Sheets, GitHub, Linear, Todoist. After connecting, the user lands on `/connected?app=<toolkit>`
+- Uploads: images are downscaled in the browser (`downscaleImage` in `src/components/app/capture.tsx`) before POST /api/capture; the multipart body is `file` (+ `force`) only
+- User-facing promises live in `src/app/privacy/page.tsx`, `src/app/terms/page.tsx`, the gate and Settings; keep them true when behaviour changes
+- Local runs: mocks in `scripts/` (see README); never point a local run at the production database or real Composio
+- CI: `.github/workflows/ci.yml` runs lint, build, then `tsc --noEmit` (needs the build's generated route types)
 - Never print or log a key
 - Docs: https://publikhq.com/llms.txt, https://publikhq.com/developers, https://publikhq.com/skills/api.md
