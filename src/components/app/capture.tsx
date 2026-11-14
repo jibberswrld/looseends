@@ -61,7 +61,8 @@ type Attachment = { file: File; kind: "image" | "pdf"; preview: string | null };
 
 const STAGES = ["Reading it", "Finding what needs doing", "Checking dates against the message"];
 
-async function downscaleImage(file: File): Promise<File> {
+/** Phone photos are several MB; resize to what the AI reads (1568 px) and re-encode as JPEG before upload. */
+export async function downscaleImage(file: File): Promise<File> {
   const bitmap = await createImageBitmap(file).catch(() => null);
   if (!bitmap) throw new Error("This image format can't be read here. Try a PNG or JPEG screenshot.");
   const max = 1568;
@@ -122,7 +123,6 @@ export function CaptureForm({ compact = false, onFinish }: { compact?: boolean; 
         const fd = new FormData();
         const file = att.kind === "image" ? await downscaleImage(att.file) : att.file;
         fd.set("file", file);
-        if (text.trim()) fd.set("note", text.trim());
         if (force) fd.set("force", "true");
         r = await api<CaptureResult>("/api/capture", { method: "POST", body: fd });
       } else {
@@ -131,7 +131,8 @@ export function CaptureForm({ compact = false, onFinish }: { compact?: boolean; 
       setResult(r);
       if (r.tasks.length) upsertMany(r.tasks);
       if (r.outcome !== "duplicate_source") {
-        setText("");
+        // A file is read on its own; anything typed stays in the box.
+        if (!att) setText("");
         setAtt(null);
       }
     } catch (e) {
@@ -186,7 +187,7 @@ export function CaptureForm({ compact = false, onFinish }: { compact?: boolean; 
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submit();
           }}
           rows={compact ? 4 : 9}
-          placeholder={att ? "Add a note about this file (optional)" : "Paste an email, a text, a note from school… anything with something to do in it."}
+          placeholder={att ? "The file is read on its own. Send it, then paste text separately." : "Paste an email, a text, a note from school… anything with something to do in it."}
           className="resize-none border-0 bg-transparent px-5 pt-4 text-[15.5px] shadow-none focus:ring-0"
         />
         {att ? (

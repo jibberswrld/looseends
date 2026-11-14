@@ -1,14 +1,24 @@
 "use client";
 
+import Image from "next/image";
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowSquareOut, Key, LockSimple, ShieldCheck, Sparkle, WifiSlash } from "@phosphor-icons/react";
+import { ArrowSquareOut, Key, LockSimple, PlugsConnected, ShieldCheck, WifiSlash } from "@phosphor-icons/react";
 import type { GateInfo } from "@/lib/types";
 import { Wordmark } from "../brand";
 import { Button, Input, Label, Skeleton } from "../ui";
 import { api, ApiFailure } from "./api";
 
-const POLL_MS = 3000;
+const POLL_FAST_MS = 3000; // the first minute: most people finish signing in quickly
+const POLL_SLOW_MS = 10_000;
+const POLL_FAST_FOR_MS = 60_000;
 const POLL_LIMIT_MS = 10 * 60_000;
+
+const TRUST: { icon: ReactNode; text: string }[] = [
+  { icon: <ShieldCheck size={18} weight="duotone" />, text: "Nothing is sent, posted or changed until you approve it." },
+  { icon: <LockSimple size={18} weight="duotone" />, text: "Your list is stored in LooseEnds' database. Delete everything from Settings any time." },
+  { icon: <PlugsConnected size={18} weight="duotone" />, text: "Gmail and 10 other apps are optional, and only read when you connect them." },
+];
 
 /** Sign in with publik. Nothing in the app renders until the gate says "ready". */
 export function Gate({ children }: { children: ReactNode }) {
@@ -47,12 +57,15 @@ export function Gate({ children }: { children: ReactNode }) {
     void load();
   }, [load]);
 
-  // Poll GET /api/gate every 3s for at most 10 minutes while waiting on the browser.
+  // Poll GET /api/gate while waiting on the other tab: every 3 s for a minute, then every 10 s, for at most 10 minutes.
   useEffect(() => {
     if (!polling) return;
     pollStart.current = Date.now();
-    const id = setInterval(async () => {
-      if (Date.now() - pollStart.current > POLL_LIMIT_MS) {
+    let timer: ReturnType<typeof setTimeout>;
+    let stopped = false;
+    const tick = async () => {
+      const elapsed = Date.now() - pollStart.current;
+      if (elapsed > POLL_LIMIT_MS) {
         setPolling(null);
         setNote(
           polling === "claim"
@@ -62,24 +75,53 @@ export function Gate({ children }: { children: ReactNode }) {
         return;
       }
       const g = await load();
-      if (!g) return;
-      if (polling === "claim" && g.state !== "sign_in") {
+      if (stopped) return;
+      if (g && polling === "claim" && g.state !== "sign_in") {
         setPolling(null);
         setNote(null);
+        return;
       }
-      if (polling === "plan" && (g.hasPlan || g.state !== "choose")) {
+      if (g && polling === "plan" && (g.hasPlan || g.state !== "choose")) {
         setPolling(null);
         setNote(null);
+        return;
       }
-    }, POLL_MS);
-    return () => clearInterval(id);
+      timer = setTimeout(tick, Date.now() - pollStart.current < POLL_FAST_FOR_MS ? POLL_FAST_MS : POLL_SLOW_MS);
+    };
+    timer = setTimeout(tick, POLL_FAST_MS);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
   }, [polling, load]);
 
   if (gate?.state === "ready") return <>{children}</>;
 
-  const signIn = () => {
-    if (!gate?.claimUrl) return;
-    window.open(gate.claimUrl, "_blank", "noopener");
+  const signIn = async () => {
+    if (gate?.claimUrl) {
+      window.open(gate.claimUrl, "_blank", "noopener");
+    } else {
+      // The session and its publik install are made only now, on the click. Open the tab inside the click so it isn't blocked.
+      const tab = window.open("about:blank", "_blank");
+      if (tab) tab.opener = null;
+      setBusy(true);
+      try {
+        const g = await api<GateInfo>("/api/gate", { method: "POST" });
+        setGate(g);
+        if (g.state !== "sign_in" || !g.claimUrl) {
+          tab?.close();
+          return;
+        }
+        if (tab) tab.location.href = g.claimUrl;
+        else window.location.href = g.claimUrl;
+      } catch (e) {
+        tab?.close();
+        setNote(e instanceof ApiFailure ? e.message : "That didn't work. Try again.");
+        return;
+      } finally {
+        setBusy(false);
+      }
+    }
     setNote("Waiting for you to sign in in your browser.");
     setPolling("claim");
   };
@@ -101,42 +143,108 @@ export function Gate({ children }: { children: ReactNode }) {
     }
   };
 
+  const pitch = !gate || gate.state === "sign_in";
   return (
     <div className="grid min-h-[100dvh] lg:grid-cols-[1.05fr_1fr]">
       <aside className="relative hidden overflow-hidden border-r border-line bg-surface lg:flex lg:flex-col lg:justify-between lg:p-12">
         <Wordmark />
-        <div className="max-w-md">
+        <div>
           <p className="text-[34px] font-semibold leading-[1.1] tracking-[-0.03em] text-ink">
             Fewer unfinished things.
             <br />
             <span className="text-muted">Nothing done without you.</span>
           </p>
-          <ul className="mt-10 space-y-5 text-[15px] text-ink-2">
-            <li className="flex gap-3">
-              <ShieldCheck size={20} weight="duotone" className="mt-0.5 shrink-0 text-accent" />
-              Replies and calendar events are prepared for you to review. Nothing goes out until you confirm it.
-            </li>
-            <li className="flex gap-3">
-              <LockSimple size={20} weight="duotone" className="mt-0.5 shrink-0 text-accent" />
-              Your list is stored in LooseEnds' database. Delete everything from Settings any time.
-            </li>
-            <li className="flex gap-3">
-              <Sparkle size={20} weight="duotone" className="mt-0.5 shrink-0 text-accent" />
-              AI runs on your publik plan, so there is no API key to paste.
-            </li>
-          </ul>
+          <div className="mt-10 flex items-start gap-10">
+            <ul className="max-w-md flex-1 space-y-5 text-[15px] text-pretty text-ink-2">
+              {TRUST.map((t) => (
+                <li key={t.text} className="flex gap-3">
+                  <span className="mt-0.5 shrink-0 text-accent-text">{t.icon}</span>
+                  {t.text}
+                </li>
+              ))}
+            </ul>
+            <Preview className="hidden w-[200px] shrink-0 xl:block" />
+          </div>
         </div>
         <p className="text-xs text-muted">Signing in connects LooseEnds to publik, which provides the AI.</p>
       </aside>
 
-      <main className="flex flex-col px-5 py-6 sm:px-10">
+      <main className="flex flex-col px-5 pt-5 pb-8 sm:px-10 sm:py-6">
         <div className="lg:hidden">
           <Wordmark />
         </div>
-        <div className="mx-auto flex w-full max-w-[420px] flex-1 flex-col justify-center py-12">
-          {!gate ? <GateSkeleton /> : <GateBody gate={gate} note={note} busy={busy} polling={polling} onRetry={() => { setNote(null); void load(); }} onSignIn={signIn} onGetPlan={getPlan} onChoose={choose} />}
+        <div className="mx-auto flex w-full max-w-[420px] flex-1 flex-col pt-7 lg:justify-center lg:py-12">
+          {pitch ? (
+            <div className="mb-6 lg:hidden">
+              <h1 className="text-[27px] font-semibold leading-[1.12] tracking-[-0.03em] text-ink">
+                Fewer unfinished things.
+                <br />
+                <span className="text-muted">Nothing done without you.</span>
+              </h1>
+              <p className="mt-3 text-[15px] leading-relaxed text-ink-2">
+                Paste an email, a photo or a PDF, or connect Gmail. LooseEnds finds what you have to do and gets the next step ready.
+              </p>
+            </div>
+          ) : null}
+          {!gate ? (
+            <GateSkeleton />
+          ) : (
+            <GateBody
+              gate={gate}
+              note={note}
+              busy={busy}
+              polling={polling}
+              onRetry={() => {
+                setNote(null);
+                void load();
+              }}
+              onSignIn={() => void signIn()}
+              onGetPlan={getPlan}
+              onChoose={choose}
+            />
+          )}
+          {pitch ? (
+            <div className="mt-9 lg:hidden">
+              <ul className="space-y-3 text-[13.5px] leading-snug text-pretty text-ink-2">
+                {TRUST.map((t) => (
+                  <li key={t.text} className="flex gap-2.5">
+                    <span className="shrink-0 text-accent-text">{t.icon}</span>
+                    {t.text}
+                  </li>
+                ))}
+              </ul>
+              <Preview className="mx-auto mt-8 w-[min(72%,260px)]" />
+            </div>
+          ) : null}
+          <p className="mt-8 text-[12.5px] text-muted">
+            <Link href="/privacy" className="underline decoration-line-strong underline-offset-[3px] hover:text-ink">
+              Privacy
+            </Link>
+            <span className="px-2" aria-hidden>
+              ·
+            </span>
+            <Link href="/terms" className="underline decoration-line-strong underline-offset-[3px] hover:text-ink">
+              Terms
+            </Link>
+          </p>
         </div>
       </main>
+    </div>
+  );
+}
+
+/** A real screenshot of LooseEnds on a phone: the list it builds and a reply waiting for approval. */
+function Preview({ className }: { className?: string }) {
+  return (
+    <div className={className}>
+      <Image
+        src="/gate-preview.jpg"
+        alt="LooseEnds on a phone: tasks found in an inbox, and a reply waiting for your approval"
+        width={780}
+        height={1688}
+        sizes="260px"
+        className="h-auto w-full rounded-[22px] border border-line-strong shadow-float"
+      />
     </div>
   );
 }
@@ -191,11 +299,15 @@ function GateBody({
 
   if (gate.state === "sign_in") {
     return (
-      <Panel title={gate.title} body={gate.body} note={note ?? gate.note} waiting={polling === "claim"}>
-        <Button variant="primary" size="lg" className="w-full" onClick={onSignIn} disabled={!gate.claimUrl}>
+      <Panel title={gate.title} body={gate.body} note={note ?? gate.note} waiting={polling === "claim"} headOnDesktop>
+        <Button variant="primary" size="lg" className="w-full" onClick={onSignIn} loading={busy}>
           Sign in with publik
           <ArrowSquareOut size={16} />
         </Button>
+        <p className="mt-3 text-[12.5px] leading-relaxed text-muted">
+          AI runs on your own publik plan. A new publik account includes $0.05 of free use; after that you need a plan (from
+          $8/month) or your own API key.
+        </p>
       </Panel>
     );
   }
@@ -245,7 +357,7 @@ export function OwnKeyForm({
       }}
     >
       <p className="text-[13px] leading-relaxed text-muted">
-        Any OpenAI-compatible API works. The key is encrypted in LooseEnds' database and only used for your requests.
+        Any OpenAI-compatible API at a public HTTPS address works. The key is encrypted in LooseEnds' database and only used for your requests.
       </p>
       <div className="space-y-1.5">
         <Label htmlFor="ok-key">API key</Label>
@@ -274,6 +386,7 @@ function Panel({
   body,
   note,
   waiting,
+  headOnDesktop,
   children,
 }: {
   icon?: ReactNode;
@@ -281,14 +394,18 @@ function Panel({
   body: string;
   note?: string | null;
   waiting?: boolean;
+  /** On phones the pitch above already says it; show the title and body from lg up only. */
+  headOnDesktop?: boolean;
   children?: ReactNode;
 }) {
   return (
     <div>
       {icon ? <div className="mb-5 inline-flex size-11 items-center justify-center rounded-xl bg-surface-2 text-ink-2">{icon}</div> : null}
-      <h1 className="text-[28px] font-semibold leading-tight tracking-[-0.025em]">{title}</h1>
-      <p className="mt-3 max-w-[48ch] text-[15px] leading-relaxed text-muted">{body}</p>
-      {children ? <div className="mt-8">{children}</div> : null}
+      <div className={headOnDesktop ? "hidden lg:block" : undefined}>
+        <h1 className="text-[28px] font-semibold leading-tight tracking-[-0.025em]">{title}</h1>
+        <p className="mt-3 max-w-[48ch] text-[15px] leading-relaxed text-muted">{body}</p>
+      </div>
+      {children ? <div className={headOnDesktop ? "lg:mt-8" : "mt-8"}>{children}</div> : null}
       {note ? (
         <p role="status" className="mt-4 flex items-center gap-2 text-[13px] text-ink-2">
           {waiting ? <span className="size-1.5 animate-pulse rounded-full bg-accent" aria-hidden /> : null}

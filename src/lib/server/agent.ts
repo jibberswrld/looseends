@@ -19,7 +19,7 @@ const tools = [
   { name: "find_tools", description: "Search tools in connected apps. Returns tool schemas and read-only status.", parameters: { ...obj, properties: { query: { type: "string" }, apps: { type: "array", items: { type: "string" } } }, required: ["query"] } },
   { name: "run_tool", description: "Run a discovered connected-app tool. Reads run now; writes create an approval card. Include complete content in arguments.", parameters: { ...obj, properties: { tool: { type: "string" }, arguments: obj, title: { type: "string", description: "For writes: short imperative label, e.g. 'Send email to Dr. Patel'" }, summary: { type: "string", description: "For writes: one plain sentence on what will happen" } }, required: ["tool", "arguments"] } },
   { name: "list_tasks", description: "List open LooseEnds tasks with source sender and Gmail thread details.", parameters: { ...obj, properties: {} } },
-  { name: "create_task", description: "Create a local LooseEnds task.", parameters: { ...obj, properties: { title: { type: "string" }, nextStep: { type: "string" }, dueAt: { type: "string", description: "ISO timestamp with offset, only if supplied by user" } }, required: ["title"] } },
+  { name: "create_task", description: "Create a local LooseEnds task.", parameters: { ...obj, properties: { title: { type: "string", maxLength: 120 }, nextStep: { type: "string", maxLength: 300 }, dueAt: { type: "string", description: "ISO timestamp with offset, only if supplied by user" } }, required: ["title"] } },
   { name: "complete_task", description: "Complete a local task by id.", parameters: { ...obj, properties: { id: { type: "string" } }, required: ["id"] } },
   { name: "dismiss_task", description: "Dismiss a local task by id.", parameters: { ...obj, properties: { id: { type: "string" } }, required: ["id"] } },
   { name: "find_todos_in_text", description: "Extract real tasks from text using the capture pipeline.", parameters: { ...obj, properties: { text: { type: "string" } }, required: ["text"] } },
@@ -41,6 +41,13 @@ const argsOf = (raw: string): Record<string, unknown> => {
 };
 const string = (v: unknown) => typeof v === "string" ? v.trim() : "";
 const actionOf = (r: Row): AgentAction => ({ id: r.id, app: r.app, tool: r.tool, title: r.title, summary: r.summary, args: r.args, status: r.status, result: r.result ?? null, error: r.error ?? null });
+
+function validateTaskArgs(args: Record<string, unknown>) {
+  if (typeof args.title !== "string" || !args.title.trim()) throw new HttpError(400, "invalid_request", "Task title required.");
+  if (args.title.length > 120) throw new HttpError(400, "invalid_request", "Task title must be 120 characters or fewer. Shorten it and try again.");
+  if (args.nextStep !== undefined && typeof args.nextStep !== "string") throw new HttpError(400, "invalid_request", "Task next step must be text.");
+  if (typeof args.nextStep === "string" && args.nextStep.length > 300) throw new HttpError(400, "invalid_request", "Task next step must be 300 characters or fewer. Shorten it and try again.");
+}
 
 async function sweepActions(userId: string) {
   await sql`update agent_actions set status = 'failed', error = 'This action timed out. Check the app before trying again.'
@@ -99,6 +106,7 @@ async function callTool(ctx: Ctx, m: AgentMessage, call: ToolCall, cache: Map<st
   m.steps.push(step); emit({ type: "step", messageId: m.id, step: { ...step } });
   try {
     checkDeadline();
+    if (name === "create_task") validateTaskArgs(a);
     let result: unknown;
     if (!approved && ["create_task", "complete_task", "dismiss_task", "find_todos_in_text", "check_inbox"].includes(name)) {
       const action = await propose(ctx, m, "looseends", `LOOSEENDS_LOCAL_${name}`, label, a, emit);
@@ -145,11 +153,10 @@ async function callTool(ctx: Ctx, m: AgentMessage, call: ToolCall, cache: Map<st
       result = rows.map((r) => ({ id: r.id, title: r.title, status: r.status, dueAt: r.due_at, nextStep: r.next_step, source: r.source_title, sender: r.sender, senderAddress: r.source_kind === "gmail" ? r.sender_address : null, gmailThreadId: r.source_kind === "gmail" ? r.thread_id : null }));
       m.taskIds.push(...rows.map((r) => r.id));
     } else if (name === "create_task") {
-      const title = string(a.title).slice(0, 120);
-      if (!title) throw new HttpError(400, "invalid_request", "Task title required.");
+      const title = a.title as string;
       const due = string(a.dueAt);
       if (due && Number.isNaN(Date.parse(due))) throw new HttpError(400, "invalid_request", "Invalid due date.");
-      const row = (await sql`insert into tasks (user_id, title, next_step, due_at, due_status, status) values (${ctx.user.id}, ${title}, ${string(a.nextStep).slice(0, 300)}, ${due || null}, ${due ? "confirmed" : "none"}, 'reviewed') returning *`)[0];
+      const row = (await sql`insert into tasks (user_id, title, next_step, due_at, due_status, status) values (${ctx.user.id}, ${title}, ${a.nextStep ?? ""}, ${due || null}, ${due ? "confirmed" : "none"}, 'reviewed') returning *`)[0];
       const task = (await hydrate([row]))[0]; m.taskIds.push(task.id); emit({ type: "tasks", tasks: [task] }); result = { id: task.id, title: task.title };
     } else if (name === "complete_task" || name === "dismiss_task") {
       const id = string(a.id); await loadTask(ctx.user.id, id);
@@ -264,6 +271,7 @@ async function decideActionTurn(ctx: Ctx, id: string, decision: "approve" | "can
     for (const key of Object.keys(edited)) if (!Object.hasOwn(args, key)) throw new HttpError(400, "invalid_request", `Cannot add argument ${key}.`);
   }
   const finalArgs = { ...args, ...edited };
+  if (row.tool === "LOOSEENDS_LOCAL_create_task") validateTaskArgs(finalArgs);
   const summary = Object.entries(finalArgs).map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`).join("\n").slice(0, 12_000);
   const held = await sql`update agent_actions set status = 'running', started_at = now(), args = ${finalArgs}, summary = ${summary} where id = ${id} and user_id = ${ctx.user.id} and status = 'pending' returning *`;
   if (!held[0]) {

@@ -65,7 +65,13 @@ async function linkUser(s: Row, w: Wallet): Promise<Row> {
   return user;
 }
 
-/** The gate, one step per call. The client polls GET /api/gate every 3 s while the sign-in screen is up. */
+/** A visitor with no session yet: the sign-in screen, without creating a session or a publik install. */
+export function signedOutGate(): GateInfo {
+  if (!isConfigured()) return info("not_configured", null, null, { body: "LooseEnds is not connected to publik yet. Please try again later." });
+  return info("sign_in", null, null, gateWords("sign_in", null));
+}
+
+/** The gate, one step per call. The client polls GET /api/gate while the sign-in screen is up. */
 export async function computeGate(s: Row): Promise<GateInfo> {
   if (!isConfigured()) {
     return info("not_configured", null, s, { body: "LooseEnds is not connected to publik yet. Please try again later." });

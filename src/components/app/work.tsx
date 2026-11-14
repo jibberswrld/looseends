@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { CaptureResult, Connections, ConnectorApp, ScanEvent, Toolkit } from "@/lib/types";
 import { api, ApiFailure, streamNdjson } from "./api";
 import { senderName } from "./bits";
+import { downscaleImage } from "./capture";
 import { useStore } from "./store";
 
 /** One line in the work stream: what LooseEnds is doing, as it does it. */
@@ -28,6 +29,7 @@ interface Work {
   disconnect: (t: Toolkit) => Promise<void>;
   refreshConnections: () => Promise<Connections | null>;
   scanInbox: () => Promise<void>;
+  /** Text, or a file on its own (the capture API reads only the file from an upload). */
   capture: (input: { text?: string; file?: File; label: string }) => Promise<void>;
   clear: () => void;
 }
@@ -182,9 +184,15 @@ export function WorkProvider({ children }: { children: ReactNode }) {
         say("step", file ? `Reading ${file.name}` : "Reading your message");
         let r: CaptureResult;
         if (file) {
+          const pdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+          if (pdf && file.size > 4_000_000) throw new ApiFailure(413, "too_large", "That PDF is over 4 MB. Try a smaller file or paste the text.");
+          const upload = pdf
+            ? file
+            : await downscaleImage(file).catch((e: Error) => {
+                throw new ApiFailure(415, "unreadable_image", e.message);
+              });
           const fd = new FormData();
-          fd.set("file", file);
-          if (text?.trim()) fd.set("note", text.trim());
+          fd.set("file", upload);
           r = await api<CaptureResult>("/api/capture", { method: "POST", body: fd });
         } else {
           r = await api<CaptureResult>("/api/capture", { method: "POST", json: { text } });

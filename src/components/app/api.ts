@@ -22,6 +22,14 @@ function timezone(): string {
   }
 }
 
+/** What to say when an error response has no readable `{error:{message}}` (a platform 413 or 429 page, say). */
+function statusMessage(status: number, fallback?: string): string {
+  if (status === 413) return "That's too large to send. Try a smaller file or screenshot, or paste the text.";
+  if (status === 429) return "Too many requests right now. Wait a moment and try again.";
+  if (status >= 500) return "LooseEnds is having trouble right now. Try again in a minute.";
+  return fallback ?? `Something went wrong (${status}). Try again.`;
+}
+
 /** Fetch a LooseEnds API route. Throws ApiFailure with the server's readable message. */
 export async function api<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
   const { json, headers, ...rest } = init;
@@ -46,7 +54,7 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
     throw new ApiFailure(
       res.status,
       e?.code ?? "error",
-      e?.message ?? `Something went wrong (${res.status}). Try again.`,
+      e?.message ?? statusMessage(res.status),
       e?.topUpUrl ?? null,
     );
   }
@@ -68,7 +76,7 @@ export async function streamNdjson<E>(path: string, json: unknown, onEvent: (e: 
   }
   if (!res.ok || !res.body) {
     const b = (await res.json().catch(() => null)) as Partial<ApiError> | null;
-    throw new ApiFailure(res.status, b?.error?.code ?? "error", b?.error?.message ?? fallback, b?.error?.topUpUrl ?? null);
+    throw new ApiFailure(res.status, b?.error?.code ?? "error", b?.error?.message ?? statusMessage(res.status, fallback), b?.error?.topUpUrl ?? null);
   }
   const reader = res.body.getReader();
   const dec = new TextDecoder();

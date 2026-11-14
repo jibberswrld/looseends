@@ -92,8 +92,10 @@ function inbox() {
 // ---------- tools ----------
 function run(tool, args, user) {
   if (tool === "GMAIL_FETCH_EMAILS") {
-    const messages = inbox().slice(0, Math.max(1, Number(args.max_results) || 1));
-    return { messages, nextPageToken: "", resultSizeEstimate: messages.length };
+    const all = inbox(), start = Number(args.page_token) || 0;
+    const messages = all.slice(start, start + Math.max(1, Number(args.max_results) || 1));
+    const next = start + messages.length;
+    return { messages, nextPageToken: next < all.length ? String(next) : "", resultSizeEstimate: all.length };
   }
   const record = (id) => calls.push({ tool, user, arguments: args, id, at: new Date().toISOString() });
   if (tool === "GMAIL_CREATE_EMAIL_DRAFT") {

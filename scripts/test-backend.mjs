@@ -45,6 +45,9 @@ const fakeAI = createServer(async (req, res) => {
   if (b.tool_choice !== "none") {
     if (last.role === "user") {
       if (user === "test local limits") calls = [tool("create_task", { title: "Approved local task" }), tool("check_inbox", {}), tool("check_inbox", {}), tool("find_todos_in_text", { text: "Please review the mock document." }), tool("create_task", { title: "Must not run" })];
+      else if (user === "test long title") calls = [tool("create_task", { title: "T".repeat(121) })];
+      else if (user === "test long next step") calls = [tool("create_task", { title: "Short", nextStep: "N".repeat(301) })];
+      else if (user === "test boundary task") calls = [tool("create_task", { title: "T".repeat(120), nextStep: "N".repeat(300) })];
       else calls = [tool("find_tools", { query: user === "test connected write" ? "gmail send" : "gmail fetch" })];
     } else if (last.role === "tool" && b.messages.some((m) => m.tool_calls?.some((t) => t.function.name === "find_tools")) && !b.messages.some((m) => m.tool_calls?.some((t) => t.function.name === "run_tool"))) {
       const meta = JSON.parse(last.content);
@@ -86,7 +89,7 @@ try {
     await new Promise((resolve) => { process.once("SIGTERM", resolve); process.once("SIGINT", resolve); });
   } else {
     const unauth = await api("/api/agent", "POST", { message: "test connected read" }); assert.equal(unauth.status, 401);
-    const gate = await api("/api/gate"); assert.equal(gate.data.state, "sign_in");
+    const gate = await api("/api/gate", "POST"); assert.equal(gate.data.state, "sign_in"); // POST creates the session and install
     await fetch(`${gate.data.claimUrl}?handle=backendtest`);
     assert.equal((await api("/api/gate")).data.state, "choose");
     assert.equal((await api("/api/gate/choice", "POST", { choice: "publik" })).data.state, "ready");
@@ -116,13 +119,45 @@ try {
     const localApproval = await api(`/api/agent/actions/${created.id}`, "POST", { decision: "approve" });
     assert(localApproval.data.some((e) => e.type === "action" && e.action.status === "done"));
     console.log("PASS four-call round cap, one inbox proposal per turn, local writes require approval");
+    const tasksBeforeInvalid = (await api("/api/tasks")).data;
+    for (const [message, limit] of [["test long title", 120], ["test long next step", 300]]) {
+      const result = await api("/api/agent", "POST", { message });
+      assert(!result.data.some((e) => e.type === "action"));
+      const feedback = requests.at(-1).messages.findLast((m) => m.role === "tool");
+      assert.match(feedback.content, new RegExp(`${limit} characters or fewer`));
+    }
+    const boundary = await api("/api/agent", "POST", { message: "test boundary task" });
+    const card = boundary.data.find((e) => e.type === "action").action;
+    assert.equal(card.args.title.length, 120); assert.equal(card.args.nextStep.length, 300);
+    for (const args of [{ title: "T".repeat(121) }, { nextStep: "N".repeat(301) }]) {
+      const rejected = await api(`/api/agent/actions/${card.id}`, "POST", { decision: "approve", args });
+      assert(rejected.data.some((e) => e.type === "error" && e.code === "invalid_request" && /characters or fewer/.test(e.message)));
+      const history = await api("/api/agent");
+      const stillPending = history.data.messages.flatMap((m) => m.actions).find((a) => a.id === card.id);
+      assert.equal(stillPending.status, "pending"); assert.deepEqual(stillPending.args, card.args);
+      assert.deepEqual((await api("/api/tasks")).data, tasksBeforeInvalid);
+    }
+    const approvedBoundary = await api(`/api/agent/actions/${card.id}`, "POST", { decision: "approve" });
+    const savedTask = approvedBoundary.data.find((e) => e.type === "tasks").tasks[0];
+    assert.equal(savedTask.title, card.args.title); assert.equal(savedTask.nextStep, card.args.nextStep);
+    const editable = await api("/api/agent", "POST", { message: "test boundary task" });
+    const editCard = editable.data.find((e) => e.type === "action").action;
+    const edited = { title: " " + "E".repeat(118) + " ", nextStep: " " + "S".repeat(298) + " " };
+    const editApproval = await api(`/api/agent/actions/${editCard.id}`, "POST", { decision: "approve", args: edited });
+    const editedTask = editApproval.data.find((e) => e.type === "tasks").tasks[0];
+    assert.equal(editedTask.title, edited.title); assert.equal(editedTask.nextStep, edited.nextStep);
+    console.log("PASS overlong proposals tell the model to shorten; overlong edits stay pending; boundary task and valid edits save exactly as approved");
     extractionDelay = 150;
     const scans = await Promise.all([api("/api/inbox/scan", "POST"), api("/api/inbox/scan", "POST")]);
     assert(scans.some((r) => r.data.some((e) => e.code === "scan_in_progress")));
     const scanned = scans.flatMap((r) => r.data).find((e) => e.type === "done"); assert.equal(scanned.scanned, 5);
     extractionDelay = 0;
-    const repeat = await api("/api/inbox/scan", "POST"); assert.equal(repeat.data.find((e) => e.type === "done").skipped, 5);
-    console.log("PASS concurrent inbox scan rejected; five emails imported; repeat skips all five");
+    const beforeRepeat = requests.filter((r) => !r.stream).length;
+    const repeat = await api("/api/inbox/scan", "POST");
+    const repeatDone = repeat.data.find((e) => e.type === "done");
+    assert.equal(repeatDone.skipped, 5); assert.equal(repeatDone.scanned, 1);
+    assert.equal(requests.filter((r) => !r.stream).length - beforeRepeat, 1);
+    console.log("PASS concurrent inbox scan rejected; repeat pages past five imports and extracts message six once");
     for (let i = 0; i < 17; i++) assert.equal((await api("/api/inbox/scan", "POST")).status, 200);
     const limited = await api("/api/inbox/scan", "POST"); assert.equal(limited.status, 429); assert.match(limited.data.error.message, /20 per hour/);
     console.log("PASS scan request 21 returns HTTP 429 with a clear hourly limit");

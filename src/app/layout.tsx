@@ -14,10 +14,17 @@ export const metadata: Metadata = {
   description:
     "Paste a message, email, screenshot or PDF. LooseEnds finds what needs doing, prepares the next step, and keeps you in control.",
   applicationName: "LooseEnds",
+  // The share image is src/app/opengraph-image.jpg and twitter-image.jpg (1200x630, a real screenshot).
   openGraph: {
     title: "LooseEnds",
     description: "Turn messages and paperwork into a short list of things you can actually finish.",
     type: "website",
+    siteName: "LooseEnds",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "LooseEnds",
+    description: "Turn messages and paperwork into a short list of things you can actually finish.",
   },
 };
 

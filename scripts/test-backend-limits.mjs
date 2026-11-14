@@ -1,7 +1,9 @@
 // Behavior tests against actual server modules, transpiled into disposable scratch space.
 // Only session context and outbound vendor responses are faked. No .env files are loaded.
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, writeFile, symlink, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdtemp, mkdir, readFile, readdir, writeFile, symlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -12,6 +14,39 @@ const scratch = await mkdtemp(join(tmpdir(), "looseends-limits-"));
 process.env.LOOSEENDS_DATA_DIR = join(scratch, "data");
 const originalFetch = globalThis.fetch, originalTimeout = AbortSignal.timeout;
 let pg;
+
+// Opt-in real PostgreSQL regression: creates and stops its own disposable local cluster.
+async function testPostgres() {
+  const exec = promisify(execFile), cluster = join(scratch, "postgres"), socket = join(scratch, "socket");
+  await mkdir(socket);
+  await exec("initdb", ["-D", cluster, "-A", "trust", "--no-locale", "-E", "UTF8"]);
+  let started = false;
+  try {
+    await exec("pg_ctl", ["-D", cluster, "-l", join(scratch, "postgres.log"), "-o", `-h '' -k '${socket}' -p 54791 -F`, "-w", "start"]);
+    started = true;
+    const psql = (text) => exec("psql", ["-X", "-h", socket, "-p", "54791", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-c", text], { env: { PATH: process.env.PATH }, maxBuffer: 2_000_000 });
+    const ddl = await readFile("db/schema.sql", "utf8");
+    await psql(ddl);
+    await psql(`insert into users (publik_handle) values ('race-fixture');
+      insert into sources (user_id, kind, title, content, content_hash) select id, 'text', 'Fixture', 'Fixture', 'fixture' from users;
+      insert into tasks (user_id, source_id, title) select user_id, id, 'Fixture' from sources;`);
+    // Pause after the early relation locks so all eight cold starts overlap deterministically.
+    const overlapping = ddl.replace('create index if not exists sessions_user_idx on sessions(user_id);', 'create index if not exists sessions_user_idx on sessions(user_id); select pg_sleep(0.1);');
+    const source = await readFile("src/lib/server/db.ts", "utf8");
+    const lock = source.match(/client\.query\("(select pg_advisory_xact_lock\(\d+\))", \[\]\)/)?.[1];
+    assert(lock, "Hosted initialization must acquire the advisory transaction lock");
+    const before = await Promise.allSettled(Array.from({ length: 8 }, () => psql(`begin; ${overlapping} commit;`)));
+    const deadlocks = before.filter((r) => r.status === "rejected" && /deadlock detected/.test(r.reason.stderr)).length;
+    assert(deadlocks > 0, "Expected the unlocked control to reproduce a deadlock");
+    assert(before.every((r) => r.status === "fulfilled" || /deadlock detected/.test(r.reason.stderr)));
+    const after = await Promise.allSettled(Array.from({ length: 8 }, () => psql(`begin; ${lock}; ${overlapping} commit;`)));
+    assert(after.every((r) => r.status === "fulfilled"));
+    console.log(`PASS PostgreSQL 17 populated-schema race: before ${deadlocks}/8 deadlocked; after 8/8 initialized`);
+  } finally {
+    if (started) await exec("pg_ctl", ["-D", cluster, "-m", "fast", "-w", "stop"]);
+  }
+}
+
 try {
   await symlink(resolve("node_modules"), join(scratch, "node_modules"));
   for (const file of await readdir("src/lib/server")) {
@@ -76,6 +111,42 @@ try {
   for await (const e of scanInbox(ctx)) assert.notEqual(e.type, "error");
   assert.equal(gmailCalls, 1); assert.equal((await sql`select scan_started_at from users where id = ${user.id}`)[0].scan_started_at, null);
   console.log("PASS fresh scan lease blocks work, expired lease recovers and releases");
+  const mail = (i) => ({ messageId: `page-${i}`, sender: "Fixture <fixture@example.test>", subject: `Message ${i}`, messageText: `Unique fixture body ${i}` });
+  let mailbox = Array.from({ length: 60 }, (_, i) => mail(i)), pageCalls = [], extractions = 0, pageMode = "normal";
+  globalThis.fetch = async (input, init) => {
+    if (String(input).endsWith("/run")) {
+      const { arguments: args } = JSON.parse(init.body); pageCalls.push(args);
+      const start = Number(args.page_token || 0);
+      const messages = pageMode === "empty" ? [] : mailbox.slice(start, start + args.max_results);
+      return Response.json({ data: { messages, nextPageToken: pageMode === "empty" ? "same-token" : start + messages.length < mailbox.length ? String(start + messages.length) : "" } });
+    }
+    extractions++;
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ title: "Fixture", classification: "no_action", tasks: [] }) } }] });
+  };
+  const scan = async () => { const events = []; for await (const e of scanInbox(ctx)) events.push(e); assert(!events.some((e) => e.type === "error")); return events.find((e) => e.type === "done"); };
+  assert.equal((await scan()).scanned, 5); assert.equal(extractions, 5); assert.equal(pageCalls.length, 1);
+  pageCalls = []; extractions = 0;
+  const second = await scan(); assert.equal(second.skipped, 5); assert.equal(second.scanned, 5);
+  assert.equal(pageCalls.length, 2); assert.equal(pageCalls[1].page_token, "5"); assert.equal(extractions, 5);
+  assert.equal((await sql`select count(*)::int as n from sources where external_id = 'page-5'`)[0].n, 1);
+  console.log("PASS scan advances beyond five imported messages and makes at most five AI extractions");
+  // Mark the first 50 as imported; message 51 must stay unexamined this scan.
+  for (let i = 10; i < 50; i++) await sql`insert into sources (user_id, kind, title, content, content_hash, external_id) values (${user.id}, 'gmail', 'Seen', 'Seen', ${`seen-${i}`}, ${`page-${i}`})`;
+  pageCalls = []; extractions = 0;
+  const bounded = await scan(); assert.equal(bounded.skipped, 50); assert.equal(bounded.scanned, 0);
+  assert.equal(pageCalls.length, 10); assert.equal(extractions, 0);
+  assert.equal((await sql`select count(*)::int as n from sources where external_id = 'page-50'`)[0].n, 0);
+  pageMode = "empty"; pageCalls = [];
+  assert.equal((await scan()).scanned, 0); assert.equal(pageCalls.length, 10); assert.equal(extractions, 0);
+  console.log("PASS scan stops at 50 examined messages; empty pages with repeating tokens also terminate");
+  // Restore the simple extraction fake used by the remaining timeout/race checks.
+  globalThis.fetch = async (_input, init) => {
+    if (holdAI) return new Promise((_, reject) => {
+      if (init.signal.aborted) reject(init.signal.reason);
+      else init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+    });
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ title: "Fixture", classification: "no_action", tasks: [] }) } }] });
+  };
   const input = { kind: "gmail", text: "Same external message", title: null, fileName: null, force: true, gmail: { from: "Fixture", address: null, externalId: "same-id", threadId: null } };
   const captures = await Promise.all([capture(ctx, input), capture(ctx, input)]);
   assert.equal(captures.filter((r) => r.outcome === "duplicate_source").length, 1);
@@ -101,6 +172,7 @@ try {
     await assert.rejects(providerFetch({ kind: "own" }, url, { signal: originalTimeout(500) }), (e) => e.code === "invalid_provider_url");
   }
   console.log("PASS hosted own-key HTTP, credentials, loopback, private and link-local rejection");
+  if (process.argv.includes("--postgres")) await testPostgres();
 } finally {
   globalThis.fetch = originalFetch; AbortSignal.timeout = originalTimeout;
   if (pg) await pg.close();
