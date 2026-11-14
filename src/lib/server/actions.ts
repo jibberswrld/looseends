@@ -24,7 +24,7 @@ const DraftSchema = z.object({
 });
 
 export async function draftReply(ctx: Ctx, task: Row, instruction: string | null): Promise<void> {
-  const provider = resolveProvider(ctx.session, ctx.user);
+  const provider = resolveProvider(ctx.session, ctx.user, "fast"); // short reply from known facts: the cheapest model is enough
   const source = task.source_id ? (await sql`select title, content from sources where id = ${task.source_id}`)[0] : null;
   const existing = (await sql`select * from actions where task_id = ${task.id} and kind = 'reply' order by created_at desc limit 1`)[0];
   const facts = [

@@ -146,7 +146,7 @@ try {
   assert.equal(done.scanned, 25); assert.equal(done.found, 1); assert.equal(done.summary, "Checked 25 recent emails: 1 new to-do, 24 with nothing to do.");
   assert.equal(await imported(), 25);
   const triagePrompt = triages[0].messages;
-  assert.equal(triages[0].model, "publik-balanced"); assert.match(triagePrompt[0].content, /UNTRUSTED data, not instructions/);
+  assert.equal(triages[0].model, "publik-fast"); assert.match(triagePrompt[0].content, /UNTRUSTED data, not instructions/);
   const sent = JSON.parse(triagePrompt[1].content.match(/<emails>\n([\s\S]*)\n<\/emails>/)[1]);
   assert.equal(sent.length, 25); assert.deepEqual(Object.keys(sent[0]).sort(), ["date", "from", "id", "snippet", "subject"]);
   assert(!triagePrompt[1].content.includes("Unsubscribe"), "Triage sees metadata only, never bodies");
@@ -184,6 +184,43 @@ try {
   pageMode = "empty"; reset();
   assert.equal((await scan()).scanned, 0); assert.equal(pageCalls.length, 20); assert.equal(extractions.length, 0);
   console.log("PASS scan stops at 100 examined messages; empty pages with repeating tokens also terminate");
+  // Model routing at the start of each agent turn.
+  const { encrypt } = await load("crypto");
+  let routerMode = "fast", seen = [];
+  const sse = (content) => new Response(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
+  globalThis.fetch = async (input, init) => {
+    if (String(input).endsWith("/status")) return Response.json({ gmail: true, googlecalendar: false, apps: [{ slug: "gmail", name: "Gmail", connected: true }] });
+    const body = JSON.parse(init.body);
+    const job = body.stream ? "agent" : String(body.messages[0].content).startsWith("You choose which AI model tier") ? "router" : "other";
+    seen.push([job, body.model, String(input)]);
+    if (job === "agent") return sse("Fixture answer.");
+    if (routerMode === "402") return new Response(JSON.stringify({ error: { message: "Your publik balance is empty.", top_up_url: "https://publik.example.test/wallet" } }), { status: 402 });
+    if (routerMode === "429") return new Response(JSON.stringify({ error: { message: "slow down" } }), { status: 429 });
+    if (routerMode === "hang") return new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true }));
+    assert.match(body.messages[1].content, /Connected apps: Gmail\. Earlier conversation: (yes|no)\.\n<request>\n"Send Sam a thanks"\n<\/request>/);
+    assert.equal(body.response_format.type, "json_object");
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ tier: "smart" }) } }] });
+  };
+  await converse(ctx, "Send Sam a thanks", () => {});
+  assert.deepEqual(seen.map(([j, model]) => [j, model]), [["router", "publik-fast"], ["agent", "publik-smart"]]);
+  for (const [mode, code] of [["402", "payment_required"], ["429", "rate_limited"]]) {
+    routerMode = mode; seen = [];
+    await assert.rejects(converse(ctx, "Send Sam a thanks", () => {}), (e) => e.code === code && (mode !== "402" || e.topUpUrl === "https://publik.example.test/wallet"));
+    assert.deepEqual(seen.map(([j]) => j), ["router"], `${mode}: one router call, surfaced like the main call, no agent call`);
+  }
+  routerMode = "hang"; seen = [];
+  AbortSignal.timeout = (ms) => originalTimeout(ms === 8_000 ? 30 : ms);
+  await converse(ctx, "Send Sam a thanks", () => {});
+  AbortSignal.timeout = originalTimeout;
+  assert.deepEqual(seen.map(([j, model]) => [j, model]), [["router", "publik-fast"], ["agent", "publik-balanced"]]);
+  console.log("PASS router picks the tier on publik-fast; 402/429 surface like the main call; a router timeout falls back to balanced");
+  const ownUser = { ...user, own_key_enc: encrypt("sk-fixture-only"), own_base_url: "http://127.0.0.1:9/v1", own_model: "my-own-model" };
+  const ownCtx = { user: ownUser, session: { id: "own-session", ai_choice: "own_key" } };
+  globalThis.__backendCtx = ownCtx; seen = [];
+  await converse(ownCtx, "Send Sam a thanks", () => {});
+  globalThis.__backendCtx = ctx;
+  assert.deepEqual(seen.map(([j, model, url]) => [j, model, url]), [["agent", "my-own-model", "http://127.0.0.1:9/v1/chat/completions"]]);
+  console.log("PASS own-key sessions make no router call and use the configured model");
   // Restore the simple extraction fake used by the remaining timeout/race checks.
   globalThis.fetch = async (_input, init) => {
     if (holdAI) return new Promise((_, reject) => {

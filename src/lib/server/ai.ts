@@ -17,12 +17,15 @@ export interface Provider {
   model: string;
 }
 
-/** Which key pays for this request: the publik install key after "Connect your plan", or the user's own key. */
-export function resolveProvider(session: Row, user: Row): Provider {
+export type Tier = keyof typeof MODELS;
+
+/** Which key pays for this request: the publik install key after "Connect your plan", or the user's own key.
+ * `tier` picks the publik model alias; an own key always uses the model the user configured. */
+export function resolveProvider(session: Row, user: Row, tier: Tier = "balanced"): Provider {
   if (session.ai_choice === "publik") {
     const key = sessionKey(session);
     if (!key) throw new HttpError(401, "gate", "Sign in with publik to continue.");
-    return { kind: "publik", baseURL: session.publik_base_url || DEFAULT_BASE_URL, apiKey: key, model: MODELS.balanced };
+    return { kind: "publik", baseURL: session.publik_base_url || DEFAULT_BASE_URL, apiKey: key, model: MODELS[tier] };
   }
   if (session.ai_choice === "own_key" && user.own_key_enc) {
     return { kind: "own", baseURL: user.own_base_url || OWN_DEFAULT_BASE_URL, apiKey: decrypt(user.own_key_enc), model: user.own_model || OWN_DEFAULT_MODEL };
@@ -48,7 +51,8 @@ export class AiRequestError extends HttpError {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** One OpenAI-compatible chat completion. Returns the assistant text. Throws HttpError with a user-facing message. */
-export async function chat(p: Provider, messages: ChatMessage[], opts: { json?: boolean; maxTokens?: number; temperature?: number } = {}): Promise<string> {
+/** `timeoutMs` (default 60 s) bounds each attempt; `retry: false` makes a single attempt (no retry after a network error, 429 or 5xx). */
+export async function chat(p: Provider, messages: ChatMessage[], opts: { json?: boolean; maxTokens?: number; temperature?: number; timeoutMs?: number; retry?: boolean } = {}): Promise<string> {
   const body = JSON.stringify({
     model: p.model,
     messages,
@@ -59,7 +63,8 @@ export async function chat(p: Provider, messages: ChatMessage[], opts: { json?: 
   if (Buffer.byteLength(body) > MAX_BYTES) {
     throw new HttpError(413, "too_large", "That's too big to read in one go. Try a smaller file or paste the important part.");
   }
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const attempts = opts.retry === false ? 1 : 2;
+  for (let attempt = 0; attempt < attempts; attempt++) {
     checkDeadline();
     let res: Response;
     try {
@@ -67,12 +72,12 @@ export async function chat(p: Provider, messages: ChatMessage[], opts: { json?: 
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${p.apiKey}` },
         body,
-        signal: requestSignal(60_000),
+        signal: requestSignal(opts.timeoutMs ?? 60_000),
       });
     } catch (e) {
       if (e instanceof HttpError) throw e;
       checkDeadline();
-      if (attempt === 0) { await sleep(1500); continue; }
+      if (attempt < attempts - 1) { await sleep(1500); continue; }
       throw new HttpError(503, "ai_unreachable", p.kind === "publik" ? "publik is not reachable. Check your connection." : "Your AI provider is not reachable right now. Try again in a moment.");
     }
     const text = await res.text();
@@ -88,7 +93,7 @@ export async function chat(p: Provider, messages: ChatMessage[], opts: { json?: 
       const t = topUpUrlFrom402(parsed);
       throw new AiRequestError(402, "payment_required", t.message, text.slice(0, 500), t.url);
     }
-    if ((res.status === 429 || res.status >= 500) && attempt === 0) { await sleep(1500); continue; }
+    if ((res.status === 429 || res.status >= 500) && attempt < attempts - 1) { await sleep(1500); continue; }
     const detail = parsed.error?.message ?? text.slice(0, 300);
     if (res.status === 401 || res.status === 403) {
       if (p.kind === "own") throw new AiRequestError(401, "own_key_invalid", "Your own AI key was rejected. Update it in Settings.", detail);

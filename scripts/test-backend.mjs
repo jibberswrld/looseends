@@ -28,10 +28,23 @@ function child(args) {
   children.push(p); return p;
 }
 const json = (res, data) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(data)); };
+const isWrite = (user) => user === "test connected write" || user.startsWith("Reply to Riverside");
 const tool = (name, args) => ({ id: `call_${name}_${Math.random()}`, type: "function", function: { name, arguments: JSON.stringify(args) } });
 const fakeAI = createServer(async (req, res) => {
   const chunks = []; for await (const c of req) chunks.push(c);
   const b = JSON.parse(Buffer.concat(chunks)); requests.push(b);
+  b.alias = req.headers["x-publik-model"]; // the publik alias the app asked for (the mock rewrites b.model)
+  const system = String(b.messages[0].content);
+  b.job = b.stream ? "agent" : system.startsWith("You choose which AI model tier") ? "router" : system.includes("sort a person's recent emails") ? "triage"
+    : system.startsWith("You write short, clear, polite replies") ? "draft" : system.includes("own to-do queue") ? "ask" : "extraction";
+  if (b.job === "router") {
+    // Stand-in for the small model's judgement, keyed on the exact test requests.
+    const request = JSON.parse(String(b.messages[1].content).match(/<request>\n([\s\S]*)\n<\/request>/)[1]);
+    if (request === "test router failure") { res.writeHead(500); return res.end("upstream down"); }
+    if (request === "test router garbage") return json(res, { choices: [{ message: { content: "probably the fast one" } }] });
+    const tier = request.startsWith("Reply to Riverside") || request === "test fast malformed" ? "fast" : "balanced";
+    return json(res, { choices: [{ message: { content: JSON.stringify({ tier }) } }] });
+  }
   if (!b.stream) {
     if (String(b.messages[0].content).includes("sort a person's recent emails")) {
       // Inbox triage sees metadata only; this stand-in picks the senders a person is waiting on.
@@ -62,18 +75,19 @@ const fakeAI = createServer(async (req, res) => {
   if (b.tool_choice !== "none") {
     if (last.role === "user") {
       if (user === "What needs a reply?") calls = [tool("list_tasks", {}), tool("check_inbox", {})];
+      else if (user === "test fast malformed") calls = b.alias === "publik-fast" ? [{ ...tool("create_task", {}), function: { name: "create_task", arguments: "{\"title\": \"Unfinished" } }] : [tool("create_task", { title: "Escalated task" })];
       else if (user.startsWith("test local removals ")) calls = [tool("complete_task", { id: user.split(" ").at(-1) }), tool("dismiss_task", { id: user.split(" ").at(-1) })];
       else if (user === "test local limits") calls = [tool("create_task", { title: "Approved local task" }), tool("check_inbox", {}), tool("check_inbox", {}), tool("find_todos_in_text", { text: "Please review the mock document." }), tool("create_task", { title: "Must not run" })];
       else if (user === "test long title") calls = [tool("create_task", { title: "T".repeat(121) })];
       else if (user === "test long next step") calls = [tool("create_task", { title: "Short", nextStep: "N".repeat(301) })];
       else if (user === "test boundary task") calls = [tool("create_task", { title: "T".repeat(120), nextStep: "N".repeat(300) })];
-      else calls = [tool("find_tools", { query: user === "test connected write" ? "gmail send" : "gmail fetch" })];
+      else calls = [tool("find_tools", { query: isWrite(user) ? "gmail send" : "gmail fetch" })];
     } else if (last.role === "tool" && b.messages.some((m) => m.tool_calls?.some((t) => t.function.name === "find_tools")) && !b.messages.some((m) => m.tool_calls?.some((t) => t.function.name === "run_tool"))) {
       const meta = JSON.parse(last.content);
-      assert(meta.some((t) => t.slug === (user === "test connected write" ? "GMAIL_SEND_EMAIL" : "GMAIL_FETCH_EMAILS")));
+      assert(meta.some((t) => t.slug === (isWrite(user) ? "GMAIL_SEND_EMAIL" : "GMAIL_FETCH_EMAILS")));
       assert(last.content.length < 10_000);
       assert(meta[0].parameters.required.length > 0);
-      calls = [tool("run_tool", user === "test connected write" ? { tool: "GMAIL_SEND_EMAIL", arguments: { recipient_email: "mock@example.test", subject: "Fixture", body: "Only a mock." }, title: "Send mock email" } : { tool: "GMAIL_FETCH_EMAILS", arguments: { max_results: 1, query: "in:inbox" } })];
+      calls = [tool("run_tool", isWrite(user) ? { tool: "GMAIL_SEND_EMAIL", arguments: { recipient_email: "mock@example.test", subject: "Fixture", body: "Only a mock." }, title: "Send mock email" } : { tool: "GMAIL_FETCH_EMAILS", arguments: { max_results: 1, query: "in:inbox" } })];
     }
   }
   res.writeHead(200, { "content-type": "text/event-stream" });
@@ -120,8 +134,8 @@ try {
     const read = await api("/api/agent", "POST", { message: "test connected read" });
     assert(read.data.some((e) => e.type === "done")); assert(!read.data.some((e) => e.type === "error"));
     assert.equal(read.data.filter((e) => e.type === "step" && e.step.status === "done").length, 2);
-    assert(requests.every((r) => r.model === "publik-balanced"));
-    console.log("PASS balanced-model find_tools → run_tool read with compact, valid schemas");
+    assert.deepEqual(requests.map((r) => [r.job, r.alias]), [["router", "publik-fast"], ["agent", "publik-balanced"], ["agent", "publik-balanced"], ["agent", "publik-balanced"]]);
+    console.log("PASS router (publik-fast) sends a read to balanced; find_tools → run_tool read with compact, valid schemas");
     const write = await api("/api/agent", "POST", { message: "test connected write" });
     const pending = write.data.find((e) => e.type === "action").action;
     assert.equal(pending.status, "pending"); assert.equal((await (await fetch(`${connector}/mock/calls`)).json()).calls.length, 0);
@@ -129,6 +143,24 @@ try {
     assert(approvals.some((r) => r.data.some((e) => e.type === "action" && e.action.status === "done")));
     assert.equal((await (await fetch(`${connector}/mock/calls`)).json()).calls.length, 1);
     console.log("PASS connected write waits for approval; racing approvals execute once");
+    const turn = async (message) => { const from = requests.length; const r = await api("/api/agent", "POST", { message }); return { events: r.data, calls: requests.slice(from).map((q) => [q.job, q.alias]) }; };
+    const reply = await turn("Reply to Riverside and confirm Thursday");
+    assert.deepEqual(reply.calls, [["router", "publik-fast"], ["agent", "publik-fast"], ["agent", "publik-fast"], ["agent", "publik-fast"]]);
+    const replyCard = reply.events.find((e) => e.type === "action").action;
+    assert.equal(replyCard.tool, "GMAIL_SEND_EMAIL"); assert.equal(replyCard.status, "pending");
+    await api(`/api/agent/actions/${replyCard.id}`, "POST", { decision: "cancel" });
+    console.log("PASS a short reply is routed to publik-fast and ends in a send card on fast");
+    for (const message of ["test router failure", "test router garbage"]) {
+      const fallback = await turn(message);
+      assert.deepEqual(fallback.calls[0], ["router", "publik-fast"]); assert.equal(fallback.calls.filter((c) => c[0] === "router").length, 1, "No router retry");
+      assert(fallback.calls.slice(1).every((c) => c[1] === "publik-balanced")); assert(fallback.events.some((e) => e.type === "done") && !fallback.events.some((e) => e.type === "error"));
+    }
+    console.log("PASS router HTTP failure or unparseable answer falls back to balanced, one router call");
+    const malformed = await turn("test fast malformed");
+    assert.deepEqual(malformed.calls, [["router", "publik-fast"], ["agent", "publik-fast"], ["agent", "publik-balanced"], ["agent", "publik-balanced"]]);
+    assert.equal(malformed.events.find((e) => e.type === "tasks").tasks[0].title, "Escalated task");
+    assert(!malformed.events.some((e) => e.type === "text" && /Unfinished/.test(e.delta)));
+    console.log("PASS a malformed fast tool call is retried once on balanced and the turn stays on balanced");
     const tasksBeforeInvalid = (await api("/api/tasks")).data;
     for (const [message, limit] of [["test long title", 120], ["test long next step", 300]]) {
       const result = await api("/api/agent", "POST", { message });
@@ -148,7 +180,8 @@ try {
     const scanned = scans.flatMap((r) => r.data).find((e) => e.type === "done");
     assert.equal(scanned.scanned, 25); assert.equal(scanned.found, 3);
     assert.equal(scanned.summary, "Checked 25 recent emails: 3 new to-dos, 22 with nothing to do.");
-    assert.equal(requests.filter((r) => !r.stream && String(r.messages[0].content).includes("sort a person's recent emails")).length, 1);
+    assert.deepEqual(requests.filter((r) => r.job === "triage").map((r) => r.alias), ["publik-fast"]);
+    assert(requests.filter((r) => r.job === "extraction").every((r) => r.alias === "publik-balanced"));
     assert.deepEqual(scans.flatMap((r) => r.data).filter((e) => e.type === "email").map((e) => e.from), ["Riverside Dental", "Maya Okafor", "City Power & Light"]);
     extractionDelay = 0;
     const beforeRepeat = requests.filter((r) => !r.stream).length;
@@ -156,7 +189,17 @@ try {
     const repeatDone = repeat.data.find((e) => e.type === "done");
     assert.equal(repeatDone.skipped, 25); assert.equal(repeatDone.scanned, 0); assert.equal(repeatDone.summary, "No new emails to check.");
     assert.equal(requests.filter((r) => !r.stream).length - beforeRepeat, 0);
-    console.log("PASS concurrent inbox scan rejected; 25 mock emails, one triage call, three real obligations read; repeat finds nothing new");
+    console.log("PASS concurrent inbox scan rejected; 25 mock emails, one publik-fast triage call, three balanced extractions; repeat finds nothing new");
+    const draftTask = (await api("/api/tasks")).data.tasks.find((t) => t.title === "Review mock message");
+    const draftFrom = requests.length;
+    assert.equal((await api(`/api/tasks/${draftTask.id}/draft`, "POST", {})).status, 200);
+    assert.deepEqual(requests.slice(draftFrom).map((r) => [r.job, r.alias]), [["draft", "publik-fast"]]);
+    console.log("PASS Draft a reply uses publik-fast");
+    const needs = await turn("What needs a reply?");
+    assert.deepEqual(needs.calls.slice(0, 2), [["router", "publik-fast"], ["agent", "publik-balanced"]]);
+    assert(needs.calls.filter((c) => c[0] === "agent").every((c) => c[1] === "publik-balanced"));
+    assert(!needs.events.some((e) => e.type === "action"));
+    console.log("PASS 'What needs a reply?' is routed to balanced and checks the inbox without a card");
     const before = (await api("/api/tasks")).data.tasks;
     const local = await api("/api/agent", "POST", { message: "test local limits" });
     assert(!local.data.some((e) => e.type === "action"), "Adding tasks, finding to-dos and checking the inbox run without approval cards");
@@ -177,7 +220,7 @@ try {
     const completed = await api(`/api/agent/actions/${removalCards[0].id}`, "POST", { decision: "approve" });
     assert.equal(completed.data.find((e) => e.type === "tasks").tasks[0].status, "completed");
     console.log("PASS complete_task and dismiss_task still wait for approval and only change the task once approved");
-    for (let i = 0; i < 16; i++) assert.equal((await api("/api/inbox/scan", "POST")).status, 200);
+    for (let i = 0; i < 15; i++) assert.equal((await api("/api/inbox/scan", "POST")).status, 200);
     const limited = await api("/api/inbox/scan", "POST"); assert.equal(limited.status, 429); assert.match(limited.data.error.message, /20 per hour/);
     console.log("PASS scan request 21 returns HTTP 429 with a clear hourly limit");
     const ownURL = await api("/api/me", "PATCH", { ownKey: { baseUrl: "https://127.0.0.1/v1", apiKey: randomUUID() } });
