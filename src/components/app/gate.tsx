@@ -357,7 +357,7 @@ export function OwnKeyForm({
       }}
     >
       <p className="text-[13px] leading-relaxed text-muted">
-        Any OpenAI-compatible API works. The key is encrypted in LooseEnds' database and only used for your requests.
+        Any OpenAI-compatible API at a public HTTPS address works. The key is encrypted in LooseEnds' database and only used for your requests.
       </p>
       <div className="space-y-1.5">
         <Label htmlFor="ok-key">API key</Label>

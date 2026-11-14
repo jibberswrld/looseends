@@ -86,7 +86,7 @@ try {
     await new Promise((resolve) => { process.once("SIGTERM", resolve); process.once("SIGINT", resolve); });
   } else {
     const unauth = await api("/api/agent", "POST", { message: "test connected read" }); assert.equal(unauth.status, 401);
-    const gate = await api("/api/gate"); assert.equal(gate.data.state, "sign_in");
+    const gate = await api("/api/gate", "POST"); assert.equal(gate.data.state, "sign_in"); // POST creates the session and install
     await fetch(`${gate.data.claimUrl}?handle=backendtest`);
     assert.equal((await api("/api/gate")).data.state, "choose");
     assert.equal((await api("/api/gate/choice", "POST", { choice: "publik" })).data.state, "ready");

@@ -4,6 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowSquareOut, CaretDown, Check, CheckCircle, NotePencil, WarningCircle, X, XCircle } from "@phosphor-icons/react";
 import type { AgentAction, AgentMessage, AgentToolStep } from "@/lib/types";
+import { LogoMark } from "../brand";
 import { Button, cx, Spinner } from "../ui";
 import { useAgent } from "./agent";
 import { AppLogo } from "./bits";
@@ -284,8 +285,10 @@ const LABELS: Record<string, string> = {
   end: "Ends",
   location: "Where",
   attendees: "Guests",
+  nextStep: "Next step",
+  dueAt: "Due",
 };
-const LONG = new Set(["body", "text", "message", "markdown_text", "content", "description", "notes", "comment", "message_body"]);
+const LONG = new Set(["body", "text", "message", "markdown_text", "content", "description", "notes", "comment", "message_body", "nextStep"]);
 const HIDDEN = /(^|_)(id|ids|url|uri|token|key|type|format|timezone)$/i;
 const ISO = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
 
@@ -356,6 +359,16 @@ function Details({ rest }: { rest: [string, unknown][] }) {
   );
 }
 
+/** LooseEnds' own actions (tool LOOSEENDS_LOCAL_<name>): a plain title and button instead of the tool name. */
+const LOCAL: Record<string, { title: string; verb: string }> = {
+  create_task: { title: "Add a task", verb: "Add task" },
+  complete_task: { title: "Mark a task done", verb: "Mark done" },
+  dismiss_task: { title: "Dismiss a task", verb: "Dismiss" },
+  find_todos_in_text: { title: "Find to-dos in this text", verb: "Find to-dos" },
+  check_inbox: { title: "Check your inbox", verb: "Check inbox" },
+};
+const localOf = (tool: string) => (tool.startsWith("LOOSEENDS_LOCAL_") ? (LOCAL[tool.slice("LOOSEENDS_LOCAL_".length)] ?? { title: "Change your list", verb: "Approve" }) : null);
+
 const STOP = new Set(["to", "in", "on", "for", "a", "an", "the", "with", "at", "from", "into", "about", "and", "as"]);
 /** The button says what happens: "Send email to Dr. Patel" -> "Send email", "Post in #general" -> "Post". */
 function verbOf(title: string): string {
@@ -380,6 +393,7 @@ function formatDate(v: string): string {
 
 function useApp(slug: string) {
   const { connections } = useWork();
+  if (slug === "looseends") return { name: "LooseEnds", logo: null, connected: true };
   const app = findApp(connections, slug);
   return { name: app?.name ?? slug.charAt(0).toUpperCase() + slug.slice(1), logo: app?.logo ?? null, connected: !!app?.connected };
 }
@@ -430,7 +444,7 @@ function CardShell({
     >
       <header className="flex items-start gap-3 px-4 pt-3.5 pb-3">
         <span className="mt-px inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] border border-line bg-surface">
-          <AppLogo slug={slug} name={app.name} logo={app.logo} size={17} />
+          {slug === "looseends" ? <LogoMark size={17} /> : <AppLogo slug={slug} name={app.name} logo={app.logo} size={17} />}
         </span>
         <span className="min-w-0 flex-1">
           <span
@@ -441,7 +455,7 @@ function CardShell({
           >
             {title}
           </span>
-          {summary && status !== "cancelled" ? <span className="mt-0.5 block text-[13.5px] leading-snug text-muted">{summary}</span> : null}
+          {summary && status !== "cancelled" ? <span className="mt-0.5 line-clamp-2 text-[13.5px] leading-snug text-muted">{summary}</span> : null}
         </span>
         <StatusTag status={status} />
       </header>
@@ -474,12 +488,18 @@ function AutoTextarea({ value, onChange, disabled, label }: { value: string; onC
 /** A change to the outside world, shown as it will go out. Edit the text, then approve it by name. */
 export function ActionCard({ action }: { action: AgentAction }) {
   const { decide, busy } = useAgent();
+  const { open } = useStore();
   const { fields, rest } = fieldsOf(action.args);
+  const local = localOf(action.tool);
+  // For a local change to one task, name the task; its id stays under Details.
+  const target = local && typeof action.args.id === "string" ? open?.find((t) => t.id === action.args.id) : null;
+  const title = local?.title ?? action.title;
+  const summary = local ? (target ? `“${target.title}”` : "") : action.summary;
   const [edits, setEdits] = useState<Record<string, string>>({});
   const pending = action.status === "pending";
   const val = (f: Field) => edits[f.key] ?? f.value;
   const edited = fields.some((f) => edits[f.key] !== undefined && edits[f.key] !== f.value);
-  const verb = verbOf(action.title);
+  const verb = local?.verb ?? verbOf(action.title);
   const short = fields.filter((f) => !f.long);
   const long = fields.filter((f) => f.long);
 
@@ -495,7 +515,7 @@ export function ActionCard({ action }: { action: AgentAction }) {
   };
 
   return (
-    <CardShell slug={action.app} title={action.title} summary={action.summary} status={action.status}>
+    <CardShell slug={action.app} title={title} summary={summary} status={action.status}>
       {fields.length && action.status !== "cancelled" ? (
         <div
           className={cx("mx-3 rounded-[9px] border border-line bg-surface px-3.5", action.status === "done" || action.status === "failed" ? "opacity-80" : "")}
@@ -524,7 +544,7 @@ export function ActionCard({ action }: { action: AgentAction }) {
           ) : null}
           {long.map((f) => (
             <div key={f.key} className={cx("py-2", short.length || f !== long[0] ? "border-t border-line" : "")}>
-              {long.length > 1 ? <div className="pt-1 text-[12px] text-muted">{f.label}</div> : null}
+              {long.length > 1 || f.key === "nextStep" ? <div className="pt-1 text-[12px] text-muted">{f.label}</div> : null}
               <AutoTextarea label={f.label} value={val(f)} disabled={!pending} onChange={(v) => setEdits((x) => ({ ...x, [f.key]: v }))} />
             </div>
           ))}
