@@ -1,3 +1,4 @@
+import { rateLimit } from "@/lib/server/rate-limit";
 import { z } from "zod";
 import { agentResponse, decideAction } from "@/lib/server/agent";
 import { handle, readJson } from "@/lib/server/http";
@@ -8,6 +9,7 @@ export const maxDuration = 300;
 export const POST = handle(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
   const { decision, args } = z.object({ decision: z.enum(["approve", "cancel"]), args: z.record(z.string(), z.unknown()).optional() }).parse(await readJson(req));
   const ready = await requireReady();
+  if (decision === "approve") await rateLimit(ready.user.id, "agent");
   const { id } = await ctx.params;
   return agentResponse((emit) => decideAction(ready, id, decision, args, emit));
 });

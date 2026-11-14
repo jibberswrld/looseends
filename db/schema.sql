@@ -1,4 +1,4 @@
--- LooseEnds schema. Idempotent: safe to run repeatedly (pnpm db:migrate).
+-- LooseEnds schema. Idempotent and additive. Hosted loader uses explicit statement-breakpoint markers.
 
 
 create table if not exists users (
@@ -12,6 +12,7 @@ create table if not exists users (
   last_seen_at timestamptz not null default now(),
   last_active_day date
 );
+-- statement-breakpoint
 
 create table if not exists sessions (
   id text primary key, -- sha256(cookie value)
@@ -30,7 +31,9 @@ create table if not exists sessions (
   created_at timestamptz not null default now(),
   last_seen_at timestamptz not null default now()
 );
+-- statement-breakpoint
 create index if not exists sessions_user_idx on sessions(user_id);
+-- statement-breakpoint
 
 create table if not exists sources (
   id uuid primary key default gen_random_uuid(),
@@ -44,8 +47,11 @@ create table if not exists sources (
   injection_detected boolean not null default false,
   created_at timestamptz not null default now()
 );
+-- statement-breakpoint
 create index if not exists sources_user_idx on sources(user_id);
+-- statement-breakpoint
 create index if not exists sources_user_hash_idx on sources(user_id, content_hash);
+-- statement-breakpoint
 
 create table if not exists tasks (
   id uuid primary key default gen_random_uuid(),
@@ -73,9 +79,13 @@ create table if not exists tasks (
   updated_at timestamptz not null default now(),
   completed_at timestamptz
 );
+-- statement-breakpoint
 create index if not exists tasks_user_idx on tasks(user_id);
+-- statement-breakpoint
 create index if not exists tasks_user_status_idx on tasks(user_id, status);
+-- statement-breakpoint
 create index if not exists tasks_source_idx on tasks(source_id);
+-- statement-breakpoint
 
 create table if not exists actions (
   id uuid primary key default gen_random_uuid(),
@@ -91,8 +101,11 @@ create table if not exists actions (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+-- statement-breakpoint
 create index if not exists actions_task_idx on actions(task_id);
+-- statement-breakpoint
 create index if not exists actions_due_reminders_idx on actions(user_id, remind_at) where kind = 'reminder' and fired_at is null;
+-- statement-breakpoint
 
 create table if not exists events (
   id bigserial primary key,
@@ -102,17 +115,27 @@ create table if not exists events (
   props jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
+-- statement-breakpoint
 create index if not exists events_name_time_idx on events(name, created_at);
+-- statement-breakpoint
 
 -- Gmail / Google Calendar (through the LooseEnds connector service).
 alter table users add column if not exists gmail_last_scan_at timestamptz;
+-- statement-breakpoint
 alter table sources add column if not exists external_id text; -- gmail message id
+-- statement-breakpoint
 alter table sources add column if not exists thread_id text;
+-- statement-breakpoint
 alter table sources add column if not exists sender text;
+-- statement-breakpoint
 alter table sources add column if not exists sender_address text;
+-- statement-breakpoint
 create unique index if not exists sources_user_external_idx on sources(user_id, external_id) where external_id is not null;
+-- statement-breakpoint
 alter table actions add column if not exists external_id text; -- gmail message / draft id, or calendar event id
+-- statement-breakpoint
 alter table actions add column if not exists sent_at timestamptz; -- set before sending: at most one send per action
+-- statement-breakpoint
 
 create table if not exists agent_messages (
   id uuid primary key default gen_random_uuid(),
@@ -123,7 +146,9 @@ create table if not exists agent_messages (
   task_ids jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now()
 );
+-- statement-breakpoint
 create index if not exists agent_messages_user_time_idx on agent_messages(user_id, created_at);
+-- statement-breakpoint
 
 create table if not exists agent_actions (
   id uuid primary key default gen_random_uuid(),
@@ -140,4 +165,19 @@ create table if not exists agent_actions (
   started_at timestamptz,
   created_at timestamptz not null default now()
 );
+-- statement-breakpoint
 create index if not exists agent_actions_message_idx on agent_actions(message_id);
+-- statement-breakpoint
+
+
+alter table users add column if not exists scan_started_at timestamptz;
+-- statement-breakpoint
+
+create table if not exists rate_limits (
+  user_id uuid not null references users(id) on delete cascade,
+  bucket text not null,
+  window_start timestamptz not null,
+  count integer not null,
+  primary key (user_id, bucket)
+);
+-- statement-breakpoint

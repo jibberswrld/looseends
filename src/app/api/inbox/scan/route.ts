@@ -1,3 +1,4 @@
+import { rateLimit } from "@/lib/server/rate-limit";
 import { handle } from "@/lib/server/http";
 import { scanInbox } from "@/lib/server/inbox";
 import { requireReady } from "@/lib/server/session";
@@ -7,6 +8,7 @@ export const maxDuration = 300;
 /** Check the inbox. Streams one ScanEvent per line (NDJSON) as each email is read. */
 export const POST = handle(async () => {
   const ctx = await requireReady();
+  await rateLimit(ctx.user.id, "scan");
   const events = scanInbox(ctx);
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({

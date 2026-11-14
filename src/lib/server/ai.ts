@@ -1,3 +1,5 @@
+import { checkDeadline, requestSignal } from "./deadline";
+import { providerFetch } from "./provider-fetch";
 import { decrypt } from "./crypto";
 import type { Row } from "./db";
 import { HttpError } from "./http";
@@ -58,15 +60,18 @@ export async function chat(p: Provider, messages: ChatMessage[], opts: { json?: 
     throw new HttpError(413, "too_large", "That's too big to read in one go. Try a smaller file or paste the important part.");
   }
   for (let attempt = 0; attempt < 2; attempt++) {
+    checkDeadline();
     let res: Response;
     try {
-      res = await fetch(`${p.baseURL.replace(/\/$/, "")}/chat/completions`, {
+      res = await providerFetch(p, `${p.baseURL.replace(/\/$/, "")}/chat/completions`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${p.apiKey}` },
         body,
-        signal: AbortSignal.timeout(60_000),
+        signal: requestSignal(60_000),
       });
-    } catch {
+    } catch (e) {
+      if (e instanceof HttpError) throw e;
+      checkDeadline();
       if (attempt === 0) { await sleep(1500); continue; }
       throw new HttpError(503, "ai_unreachable", p.kind === "publik" ? "publik is not reachable. Check your connection." : "Your AI provider is not reachable right now. Try again in a moment.");
     }
@@ -101,14 +106,16 @@ export async function streamChat(
   p: Provider, messages: ChatMessage[], tools: { type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } }[],
   onText: (delta: string) => void, opts: { maxTokens?: number; toolChoice?: "none" } = {},
 ): Promise<{ content: string; toolCalls: ToolCall[] }> {
-  const body = JSON.stringify({ model: p.kind === "publik" ? MODELS.smart : p.model, messages, tools, stream: true, temperature: 0.2, max_tokens: opts.maxTokens ?? 1800, ...(opts.toolChoice ? { tool_choice: opts.toolChoice } : {}) });
+  const body = JSON.stringify({ model: p.model, messages, tools, stream: true, temperature: 0.2, max_tokens: opts.maxTokens ?? 1800, ...(opts.toolChoice ? { tool_choice: opts.toolChoice } : {}) });
   if (Buffer.byteLength(body) > MAX_BYTES) throw new HttpError(413, "too_large", "That conversation is too large. Start a new chat.");
   let res: Response;
   try {
-    res = await fetch(`${p.baseURL.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${p.apiKey}` }, body, signal: AbortSignal.timeout(90_000),
+    res = await providerFetch(p, `${p.baseURL.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${p.apiKey}` }, body, signal: requestSignal(90_000),
     });
-  } catch {
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    checkDeadline();
     throw new HttpError(503, "ai_unreachable", p.kind === "publik" ? "publik is not reachable. Check your connection." : "Your AI provider is not reachable right now.");
   }
   if (!res.ok) {
@@ -179,7 +186,8 @@ export function parseJsonObject(text: string): unknown {
 export async function validateOwnKey(baseURL: string, apiKey: string, model: string): Promise<void> {
   const base = baseURL.replace(/\/$/, "");
   try {
-    const r = await fetch(`${base}/models`, { headers: { authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(15_000) });
+    const r = await providerFetch({ kind: "own" }, `${base}/models`, { headers: { authorization: `Bearer ${apiKey}` }, signal: requestSignal(15_000) });
+    await r.body?.cancel();
     if (r.ok) return;
     if (r.status === 401 || r.status === 403) throw new HttpError(400, "own_key_invalid", "That key was rejected by the provider. Check it and try again.");
   } catch (e) {

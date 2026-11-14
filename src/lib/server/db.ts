@@ -17,9 +17,8 @@ function hostedDb() {
   if (!url) throw new Error("DATABASE_URL is not set");
   const client = (g.__looseendsNeon ??= neon(url));
   g.__looseendsSchema ??= (async () => {
-    for (const statement of schema().split(";").map((s) => s.trim()).filter((s) => s && !/^--[^\n]*$/.test(s))) {
-      await client.query(statement, []);
-    }
+    const statements = schema().split("-- statement-breakpoint").map((s) => s.trim()).filter(Boolean);
+    await client.transaction(statements.map((statement) => client.query(statement, [])), { fetchOptions: { signal: AbortSignal.timeout(20_000) } });
   })().catch((e) => { g.__looseendsSchema = undefined; throw e; });
   return { client, ready: g.__looseendsSchema };
 }
@@ -48,7 +47,7 @@ export async function query(text: string, params: unknown[]): Promise<Row[]> {
   if (process.env.DATABASE_URL) {
     const { client, ready } = hostedDb();
     await ready;
-    return (await client.query(text, values)) as Row[];
+    return (await client.query(text, values, { fetchOptions: { signal: AbortSignal.timeout(15_000) } })) as Row[];
   }
   if (process.env.VERCEL) throw new Error("DATABASE_URL must be set on Vercel.");
   return (await (await db()).query<Row>(text, values)).rows;
