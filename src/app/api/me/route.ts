@@ -1,3 +1,4 @@
+import { connectorDisconnectAll, connectorError } from "@/lib/server/connector";
 import { z } from "zod";
 import type { Me } from "@/lib/types";
 import { OWN_DEFAULT_BASE_URL, OWN_DEFAULT_MODEL, validateOwnKey } from "@/lib/server/ai";
@@ -65,6 +66,8 @@ export const PATCH = handle(async (req: Request) => {
 /** Delete the account and everything in it: sources, tasks, actions, analytics events, sessions. */
 export const DELETE = handle(async () => {
   const { user } = await requireReady();
+  const disconnected = await connectorDisconnectAll();
+  if (!disconnected.ok) throw connectorError(disconnected, "apps");
   await sql`delete from users where id = ${user.id}`; // cascades to sources, tasks, actions, events, sessions
   await clearCookie();
   return json({ ok: true });

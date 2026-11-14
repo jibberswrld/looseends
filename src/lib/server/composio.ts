@@ -1,9 +1,8 @@
-// The hosted connector routes hold COMPOSIO_API_KEY. Older local installations still call them directly.
-import { Composio } from "@composio/core";
+// Server-only Composio access; no public bearer-key connector.
+import { Composio, ToolRouterSession } from "@composio/core";
 import type { ConnectorApp, Toolkit } from "@/lib/types";
-import { sha256 } from "./crypto";
+import type { Row } from "./db";
 import { HttpError } from "./http";
-import { PublikUnreachable, readWallet } from "./publik";
 
 export const TOOLKITS: Toolkit[] = ["gmail", "googlecalendar", "outlook", "slack", "notion", "googledrive", "googledocs", "googlesheets", "github", "linear", "todoist"];
 export interface ConnectorTool {
@@ -15,60 +14,32 @@ export interface ConnectorTool {
   readOnly: boolean;
 }
 
-const VERIFY_TTL_MS = 5 * 60_000;
-const verified = new Map<string, { handle: string; until: number }>();
-
-/** Bearer publik key -> the Composio user id for that publik account. 401 unless the key is claimed. */
-async function verifyCaller(req: Request): Promise<string> {
-  const unauthorized = () => new HttpError(401, "unauthorized", "Sign in with publik to connect your accounts.");
-  const key = /^Bearer (pk_\S+)$/.exec(req.headers.get("authorization") ?? "")?.[1];
-  if (!key) throw unauthorized();
-  const id = sha256(key);
-  const hit = verified.get(id);
-  if (hit && hit.until > Date.now()) return `looseends_${hit.handle}`;
-  verified.delete(id);
-  let handle: string | null | undefined;
-  try {
-    const { wallet } = await readWallet(key);
-    handle = wallet?.claim_state === "claimed" ? wallet.account?.handle : null;
-  } catch (e) {
-    if (e instanceof PublikUnreachable) throw new HttpError(503, "unreachable", e.message);
-    throw e;
-  }
-  if (!handle) throw unauthorized();
-  if (verified.size > 5000) verified.clear();
-  verified.set(id, { handle, until: Date.now() + VERIFY_TTL_MS });
-  return `looseends_${handle}`;
-}
-
-/** Every connector route starts here: who is calling (401), and is this deployment the connector at all (503). */
-export async function connectorCaller(req: Request) {
-  const userId = await verifyCaller(req);
+/** Only a signed-in LooseEnds user row determines the Composio identity. */
+export function connectorCaller(user: Row) {
+  if (!user.publik_handle) throw new HttpError(401, "gate", "Sign in with publik to connect your accounts.");
   const apiKey = process.env.COMPOSIO_API_KEY;
   if (!apiKey) throw new HttpError(503, "connector_not_configured", "App connections aren't switched on yet.");
-  return { userId, composio: new Composio({ apiKey }) };
+  return { userId: `looseends_${user.publik_handle}`, composio: new Composio({ apiKey }) };
 }
 
-/** The caller plus a Composio session scoped to supported toolkits. */
-export async function connectorSession(req: Request) {
-  const { userId, composio } = await connectorCaller(req);
-  try {
-    return { userId, composio, session: await composio.create(userId, { toolkits: TOOLKITS }) };
-  } catch (e) {
-    throw upstream(e);
-  }
+export async function connectorSession(user: Row, signal: AbortSignal) {
+  const { userId, composio } = connectorCaller(user);
+  const session = await composio.create(userId, { toolkits: TOOLKITS }, { signal });
+  // SDK 0.29's Session interface omits cancellation arguments present on its runtime class.
+  if (!(session instanceof ToolRouterSession)) throw new Error("Unexpected Composio session");
+  return { userId, composio, session };
 }
 type Session = Awaited<ReturnType<typeof connectorSession>>["session"];
 
 /** A Composio failure, without leaking its details to the caller. */
 export function upstream(e: unknown): HttpError {
   if (e instanceof HttpError) return e;
-  console.error("[connector]", e instanceof Error ? `${e.name}: ${e.message}` : e);
+  console.error("[connector] upstream request failed");
   return new HttpError(502, "connector_error", "The connected app didn't answer. Please try again in a moment.");
 }
 
-export async function connectionStatus(session: Session): Promise<{ gmail: boolean; googlecalendar: boolean; apps: ConnectorApp[]; [toolkit: string]: boolean | ConnectorApp[] }> {
-  const { items } = await session.toolkits({ toolkits: TOOLKITS });
+export async function connectionStatus(session: Session, signal: AbortSignal): Promise<{ gmail: boolean; googlecalendar: boolean; apps: ConnectorApp[]; [toolkit: string]: boolean | ConnectorApp[] }> {
+  const { items } = await session.toolkits({ toolkits: TOOLKITS }, { signal });
   const apps = TOOLKITS.map((slug) => {
     const item = items.find((i) => i.slug.toLowerCase() === slug);
     return { slug, name: item?.name ?? slug, logo: item?.logo ?? null, connected: item?.connection?.isActive === true };
@@ -81,8 +52,8 @@ export function parseToolkit(v: unknown): Toolkit {
   throw new HttpError(400, "invalid_request", "Unsupported app.");
 }
 
-export async function toolMetadata(composio: Composio, slug: string): Promise<ConnectorTool> {
-  const tool = await composio.tools.getRawComposioToolBySlug(slug);
+export async function toolMetadata(composio: Composio, slug: string, signal: AbortSignal): Promise<ConnectorTool> {
+  const tool = await composio.tools.getRawComposioToolBySlug(slug, undefined, { signal });
   const toolkit = tool.toolkit?.slug?.toLowerCase() ?? "";
   if (!TOOLKITS.includes(toolkit)) throw new HttpError(403, "tool_not_allowed", "LooseEnds can't use that tool.");
   const tags = tool.tags ?? [];

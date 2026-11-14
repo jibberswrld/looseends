@@ -1,3 +1,4 @@
+import { rateLimit } from "@/lib/server/rate-limit";
 import { z } from "zod";
 import { agentResponse, clearMessages, converse, messages } from "@/lib/server/agent";
 import { handle, json, readJson } from "@/lib/server/http";
@@ -19,5 +20,6 @@ export const DELETE = handle(async () => {
 export const POST = handle(async (req: Request) => {
   const { message } = z.object({ message: z.string().trim().min(1).max(10_000) }).parse(await readJson(req));
   const ctx = await requireReady();
+  await rateLimit(ctx.user.id, "agent");
   return agentResponse((emit) => converse(ctx, message, emit));
 });
