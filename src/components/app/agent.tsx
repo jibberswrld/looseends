@@ -21,7 +21,7 @@ interface Agent {
   notice: AgentNotice | null;
   send: (text: string) => Promise<void>;
   decide: (action: AgentAction, decision: "approve" | "cancel", args?: Record<string, unknown>) => Promise<void>;
-  reset: () => Promise<void>;
+  reset: () => Promise<boolean>;
 }
 
 const Ctx = createContext<Agent | null>(null);
@@ -130,11 +130,11 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const send = useCallback(
     async (text: string) => {
       const t = text.trim();
-      if (!t || inFlight.current) return;
+      if (!t || !loaded || inFlight.current) return;
       setMessages((list) => [...list, blank(`${LOCAL}${++seq.current}`, "user", t)]);
       await run("/api/agent", { message: t }, () => {});
     },
-    [run],
+    [run, loaded],
   );
 
   const setStatus = (id: string, status: AgentAction["status"]) =>
@@ -150,17 +150,22 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   );
 
   const reset = useCallback(async () => {
-    if (inFlight.current) return;
-    const before = messages;
-    setMessages([]);
-    setNotice(null);
+    if (!loaded || inFlight.current) return false;
+    inFlight.current = true;
+    setBusy(true);
     try {
       await api("/api/agent", { method: "DELETE" });
+      setMessages([]);
+      setNotice(null);
+      return true;
     } catch (e) {
-      setMessages(before);
       reportError(e, "Couldn't start a new chat.");
+      return false;
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
     }
-  }, [messages]);
+  }, [loaded]);
 
   const value = useMemo<Agent>(() => ({ messages, loaded, busy, liveId, notice, send, decide, reset }), [messages, loaded, busy, liveId, notice, send, decide, reset]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -199,7 +199,7 @@ try {
     if (routerMode === "hang") return new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true }));
     assert.match(body.messages[1].content, /Connected apps: Gmail\. Earlier conversation: (yes|no)\.\n<request>\n"Send Sam a thanks"\n<\/request>/);
     assert.equal(body.response_format.type, "json_object");
-    return Response.json({ choices: [{ message: { content: JSON.stringify({ tier: "smart" }) } }] });
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ tier: "smart", needsRead: false }) } }] });
   };
   await converse(ctx, "Send Sam a thanks", () => {});
   assert.deepEqual(seen.map(([j, model]) => [j, model]), [["router", "publik-fast"], ["agent", "publik-smart"]]);
@@ -212,15 +212,15 @@ try {
   AbortSignal.timeout = (ms) => originalTimeout(ms === 8_000 ? 30 : ms);
   await converse(ctx, "Send Sam a thanks", () => {});
   AbortSignal.timeout = originalTimeout;
-  assert.deepEqual(seen.map(([j, model]) => [j, model]), [["router", "publik-fast"], ["agent", "publik-balanced"]]);
+  assert.deepEqual(seen.map(([j, model]) => [j, model]), [["router", "publik-fast"], ["agent", "publik-balanced"], ["agent", "publik-balanced"]]);
   console.log("PASS router picks the tier on publik-fast; 402/429 surface like the main call; a router timeout falls back to balanced");
   const ownUser = { ...user, own_key_enc: encrypt("sk-fixture-only"), own_base_url: "http://127.0.0.1:9/v1", own_model: "my-own-model" };
   const ownCtx = { user: ownUser, session: { id: "own-session", ai_choice: "own_key" } };
-  globalThis.__backendCtx = ownCtx; seen = [];
+  globalThis.__backendCtx = ownCtx; seen = []; routerMode = "smart";
   await converse(ownCtx, "Send Sam a thanks", () => {});
   globalThis.__backendCtx = ctx;
-  assert.deepEqual(seen.map(([j, model, url]) => [j, model, url]), [["agent", "my-own-model", "http://127.0.0.1:9/v1/chat/completions"]]);
-  console.log("PASS own-key sessions make no router call and use the configured model");
+  assert.deepEqual(seen.map(([j, model, url]) => [j, model, url]), [["router", "my-own-model", "http://127.0.0.1:9/v1/chat/completions"], ["agent", "my-own-model", "http://127.0.0.1:9/v1/chat/completions"]]);
+  console.log("PASS own-key sessions classify grounding needs and keep the configured model for both calls");
   // A slow AI must read as slow, not as a connection problem, and a turn cut short still answers from what it read.
   let agentRounds = 0;
   globalThis.fetch = async (input, init) => {

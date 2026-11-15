@@ -92,7 +92,8 @@ async function call<T>(path: string, body: Record<string, unknown> | null, timeo
         if (result.resultType !== "completed") throw new HttpError(502, "tool_failed", "The connected app couldn't complete that. Please try again.");
         const output = tool === "GMAIL_FETCH_EMAILS" ? slimEmails(result.data) : result.data;
         const serialized = JSON.stringify(output);
-        data = { data: serialized.length > 200_000 ? { truncated: true, result: serialized.slice(0, 200_000) } : output };
+        const limit = tool === "GMAIL_FETCH_EMAILS" ? 1_000_000 : 200_000;
+        data = { data: serialized.length > limit ? { truncated: true, error: "Result too large. Request smaller pages or a narrower query." } : output };
       } else throw new Error("Unknown connector operation");
     }
     return { ok: true, data: data as T };

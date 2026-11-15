@@ -13,6 +13,7 @@ import {
   CheckCircle,
   EnvelopeSimple,
   MinusCircle,
+  NotePencil,
   PaperPlaneTilt,
   Paperclip,
   PencilSimpleLine,
@@ -59,14 +60,14 @@ export function Composer({ hasTasks, onOpenTask }: { hasTasks: boolean; onOpenTa
     const el = ta.current;
     if (!el) return;
     el.style.height = "0px";
-    el.style.height = Math.min(240, Math.max(talking ? 48 : 64, el.scrollHeight)) + "px";
-  }, [text, talking]);
+    el.style.height = Math.min(120, Math.max(52, el.scrollHeight)) + "px";
+  }, [text]);
 
   const attach = (f: File) => {
     if (f.type === "application/pdf" || f.type.startsWith("image/")) setFile(f);
   };
   // A file still goes through capture (it finds the to-dos in it); anything typed goes to the agent.
-  const canSend = file ? !w.running : !agent.busy && text.trim().length > 0;
+  const canSend = agent.loaded && !agent.busy && (file ? !w.running : text.trim().length > 0);
   const send = () => {
     if (!canSend) return;
     const t = text.trim();
@@ -80,8 +81,17 @@ export function Composer({ hasTasks, onOpenTask }: { hasTasks: boolean; onOpenTa
     setText("");
   };
 
+  const newChat = async () => {
+    const before = text, beforeFile = file;
+    if (await agent.reset()) {
+      setText((current) => current === before ? "" : current);
+      setFile((current) => current === beforeFile ? null : current);
+      ta.current?.focus();
+    }
+  };
+
   return (
-    <div>
+    <section aria-label="Assistant chat">
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -95,74 +105,89 @@ export function Composer({ hasTasks, onOpenTask }: { hasTasks: boolean; onOpenTa
           if (f) attach(f);
         }}
         className={cx(
-          "relative z-10 overflow-hidden rounded-[18px] border bg-surface shadow-float transition-[border-color,box-shadow] duration-150",
+          "relative z-10 flex h-[min(640px,calc(100dvh-250px))] min-h-[300px] flex-col overflow-hidden rounded-xl border bg-surface lg:h-[min(680px,calc(100dvh-170px))]",
           drag ? "border-accent-text ring-4 ring-accent-soft" : "border-line-strong has-[#composer:focus]:border-ink/25 has-[#composer:focus]:ring-4 has-[#composer:focus]:ring-ink/[0.04]",
         )}
       >
-        {talking ? <Thread onOpenTask={onOpenTask} /> : null}
-        <label htmlFor="composer" className="sr-only">
-          Ask about your inbox, or tell me what to do
-        </label>
-        <textarea
-          id="composer"
-          ref={ta}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onPaste={(e) => {
-            const f = Array.from(e.clipboardData.files)[0];
-            if (f) {
-              e.preventDefault();
-              attach(f);
-            }
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              send();
-            }
-          }}
-          placeholder={file ? "Send to find the to-dos in this file" : talking ? "Reply, or ask for something else" : "Ask about your inbox, or tell me what to do"}
-          className="block w-full resize-none bg-transparent px-5 pt-4 text-[15.5px] leading-relaxed text-ink outline-none placeholder:text-muted"
-        />
-        {file ? (
-          <div className="mx-4 mb-2 inline-flex items-center gap-2 rounded-lg bg-surface-2 py-1.5 pr-1.5 pl-3 text-[13px]">
-            <Paperclip size={14} />
-            <span className="max-w-[28ch] truncate">{file.name}</span>
-            <span className="text-muted">· finds the to-dos in it</span>
-            <button aria-label="Remove file" onClick={() => setFile(null)} className="inline-flex size-6 items-center justify-center rounded-md text-muted hover:bg-surface hover:text-ink">
-              <X size={13} />
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-line px-4 sm:px-5">
+          <span className="text-[14px] font-medium text-ink">Assistant</span>
+          <button
+            onClick={() => void newChat()}
+            disabled={!agent.loaded || agent.busy}
+            className="inline-flex h-9 items-center gap-2 rounded-lg border border-line-strong px-3 text-[13px] font-medium text-ink-2 transition-colors duration-150 hover:bg-surface-2 disabled:opacity-40"
+          >
+            <NotePencil size={16} /> New chat
+          </button>
+        </div>
+        <Thread onOpenTask={onOpenTask} empty={agent.loaded ? <>
+          <p className="text-center font-serif text-[27px] tracking-[-0.02em] text-ink">What can I take off your plate?</p>
+          <p className="mt-2 max-w-[42ch] text-center text-[14px] leading-relaxed text-muted">Ask about your inbox or connected apps. I’ll read the source before answering.</p>
+          <Chips hasTasks={hasTasks} />
+        </> : <Spinner className="text-muted" />} />
+        <div className="shrink-0">
+          <label htmlFor="composer" className="sr-only">
+            Ask about your inbox, or tell me what to do
+          </label>
+          <textarea
+            id="composer"
+            ref={ta}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onPaste={(e) => {
+              const f = Array.from(e.clipboardData.files)[0];
+              if (f) {
+                e.preventDefault();
+                attach(f);
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                send();
+              }
+            }}
+            placeholder={file ? "Send to find the to-dos in this file" : talking ? "Reply, or ask for something else" : "Ask about your inbox, or tell me what to do"}
+            className="block w-full resize-none bg-transparent px-5 pt-3 text-[16px] leading-relaxed text-ink outline-none placeholder:text-muted"
+          />
+          {file ? (
+            <div className="mx-4 mb-2 inline-flex items-center gap-2 rounded-lg bg-surface-2 py-1.5 pr-1.5 pl-3 text-[13px]">
+              <Paperclip size={14} />
+              <span className="max-w-[28ch] truncate">{file.name}</span>
+              <span className="text-muted">· finds the to-dos in it</span>
+              <button aria-label="Remove file" onClick={() => setFile(null)} className="inline-flex size-6 items-center justify-center rounded-md text-muted hover:bg-surface hover:text-ink">
+                <X size={13} />
+              </button>
+            </div>
+          ) : null}
+          <div className="flex items-center gap-1.5 px-3 pb-3">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,application/pdf"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) attach(f);
+                e.target.value = "";
+              }}
+            />
+            <button onClick={() => fileRef.current?.click()} aria-label="Attach a screenshot or PDF" title="Attach a screenshot or PDF" className="inline-flex size-8 items-center justify-center rounded-full border border-line-strong text-ink-2 transition-colors duration-150 hover:bg-surface-2 hover:text-ink">
+              <Paperclip size={15} />
+            </button>
+            <span className="ml-auto hidden text-[12px] text-muted sm:inline">Shift Enter for a new line</span>
+            <button
+              onClick={send}
+              disabled={!canSend}
+              aria-label={file ? "Find to-dos in this file" : "Send"}
+              className="ml-auto inline-flex size-9 items-center justify-center rounded-full bg-accent text-accent-ink sm:ml-0 transition-[background-color,transform,opacity] duration-150 hover:bg-accent-hover active:scale-[0.96] disabled:opacity-25"
+            >
+              {agent.busy || (file && w.running) ? <Spinner /> : <ArrowUp size={17} weight="bold" />}
             </button>
           </div>
-        ) : null}
-        <div className="flex items-center gap-1.5 px-3 pb-3">
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp,application/pdf"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) attach(f);
-              e.target.value = "";
-            }}
-          />
-          <button onClick={() => fileRef.current?.click()} aria-label="Attach a screenshot or PDF" title="Attach a screenshot or PDF" className="inline-flex size-8 items-center justify-center rounded-full border border-line-strong text-ink-2 transition-colors duration-150 hover:bg-surface-2 hover:text-ink">
-            <Paperclip size={15} />
-          </button>
-          <span className="ml-auto hidden text-[12px] text-muted sm:inline">Shift Enter for a new line</span>
-          <button
-            onClick={send}
-            disabled={!canSend}
-            aria-label={file ? "Find to-dos in this file" : "Send"}
-            className="inline-flex size-9 items-center justify-center rounded-full bg-accent text-accent-ink transition-[background-color,transform,opacity] duration-150 hover:bg-accent-hover active:scale-[0.96] disabled:opacity-25"
-          >
-            {agent.busy || (file && w.running) ? <Spinner /> : <ArrowUp size={17} weight="bold" />}
-          </button>
         </div>
       </div>
       <ConnectStrip />
-      {talking ? null : <Chips hasTasks={hasTasks} />}
-    </div>
+    </section>
   );
 }
 
@@ -181,8 +206,8 @@ function ConnectStrip() {
       </>
     );
     action = (
-      <Button size="sm" variant="primary" onClick={() => void w.scanInbox()} disabled={!!w.running} className="rounded-full">
-        Check my inbox
+      <Button size="sm" variant="secondary" onClick={() => void w.scanInbox()} disabled={!!w.running} className="rounded-full">
+        Find new to-dos
       </Button>
     );
   } else if (w.linking === "gmail") {
@@ -225,7 +250,7 @@ function Chips({ hasTasks }: { hasTasks: boolean }) {
   ];
   if (!hasTasks) chips.push({ icon: <Sparkle size={14} />, label: "Try a sample email", run: () => void w.capture({ text: EXAMPLE, label: "Try a sample email" }) });
   return (
-    <div className="mt-4 flex flex-wrap justify-center gap-2">
+    <div className="mt-5 flex flex-wrap justify-center gap-2">
       {chips.map((c) => (
         <button
           key={c.label}

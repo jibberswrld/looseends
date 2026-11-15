@@ -17,7 +17,7 @@ const APPS = [
   ["googlesheets", "Google Sheets"], ["github", "GitHub"], ["linear", "Linear"], ["todoist", "Todoist"],
 ];
 const TOOLS = [
-  ["GMAIL_FETCH_EMAILS", "gmail", "Fetch emails", true, { query: { type: "string" }, max_results: { type: "integer" } }],
+  ["GMAIL_FETCH_EMAILS", "gmail", "Fetch emails", true, { query: { type: "string" }, max_results: { type: "integer" }, page_token: { type: "string" } }],
   ["GMAIL_CREATE_EMAIL_DRAFT", "gmail", "Create email draft", false, { recipient_email: { type: "string" }, subject: { type: "string" }, body: { type: "string" } }],
   ["GMAIL_REPLY_TO_THREAD", "gmail", "Reply to thread", false, { thread_id: { type: "string" }, message_body: { type: "string" } }],
   ["GMAIL_SEND_EMAIL", "gmail", "Send email", false, { recipient_email: { type: "string" }, subject: { type: "string" }, body: { type: "string" } }],
@@ -28,11 +28,12 @@ const TOOLS = [
   ["NOTION_SEARCH", "notion", "Search Notion", true, { query: { type: "string" } }],
   ["TODOIST_CREATE_TASK", "todoist", "Create Todoist task", false, { content: { type: "string" } }],
 ];
-const metadata = ([slug, toolkit, name, readOnly, properties]) => ({ slug, toolkit, name, description: name, readOnly, parameters: { type: "object", properties, required: Object.keys(properties) } });
+const metadata = ([slug, toolkit, name, readOnly, properties]) => ({ slug, toolkit, name, description: name, readOnly, parameters: { type: "object", properties, required: Object.keys(properties).filter((key) => key !== "page_token") } });
 
 const connected = new Map(); // user -> Set<toolkit>
 let calls = []; // { tool, user, arguments, at, id }
 let failing = false;
+let emailCount = Number(process.env.MOCK_EMAIL_COUNT || 0);
 
 const send = (res, status, body) => {
   res.writeHead(status, { "content-type": "application/json" });
@@ -87,7 +88,7 @@ const NOISE = [
 ];
 
 function inbox() {
-  return [
+  const messages = [
     ...NOISE.map(([sender, subject], i) => message(`19a8d0${String(i).padStart(10, "0")}`, `19a8d0${String(i).padStart(10, "0")}`, sender, subject, 0.5 + i * 0.1,
       `${subject}.\n\nThis is an automated message. Manage your email preferences or unsubscribe at any time.`)),
     message("19a8c1f0e2b34a01", "19a8c1f0e2b34a01", "Riverside Dental <frontdesk@riversidedental.example>", "Please confirm your cleaning appointment", 3,
@@ -103,6 +104,13 @@ function inbox() {
     message("19a887c2d9a4f106", "19a887c2d9a4f106", "City Power & Light <billing@citypower.example>", "Your electricity bill is ready", 70,
       `Hello,\n\nYour statement for account ending 4471 is ready. Amount due: $84.12.\n\nPayment is due on ${longDate(day(4))}. A late fee of $10 applies after that date. You can pay online, by phone at 555-0199, or by mail.\n\nCity Power & Light`),
   ];
+  const count = emailCount || messages.length;
+  while (messages.length < count) {
+    const n = messages.length + 1;
+    messages.push(message(`fixture-${n}`, `fixture-thread-${n}`, `Fixture Sender ${n} <sender${n}@example.test>`, `Fixture subject ${n}`, n * 3,
+      `Fixture email ${n}. This is the source content for message ${n}. ` + "A longer email excerpt to exercise complete result delivery. ".repeat(8)));
+  }
+  return messages;
 }
 
 // ---------- tools ----------
@@ -156,6 +164,7 @@ createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "text/html" });
       return res.end(`<!doctype html><title>mock connector</title><p>${toolkit === "gmail" ? "Gmail" : "Google Calendar"} is connected. You can close this tab and go back to LooseEnds.</p>`);
     }
+    if (req.method === "GET" && path.startsWith("/mock/email-count/")) { emailCount = Math.min(500, Math.max(0, Number(path.split("/").at(-1)) || 0)); return send(res, 200, { emailCount }); }
     if (req.method === "GET" && path === "/mock/calls") return send(res, 200, { calls });
     if (req.method === "GET" && path === "/mock/reset") { calls = []; failing = false; connected.clear(); return send(res, 200, { ok: true }); }
     if (req.method === "GET" && path.startsWith("/mock/fail/")) { failing = path.endsWith("/on"); return send(res, 200, { failing }); }
