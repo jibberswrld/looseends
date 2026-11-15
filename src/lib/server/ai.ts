@@ -117,9 +117,12 @@ export async function chat(p: Provider, messages: ChatMessage[], opts: { json?: 
 /** OpenAI-compatible streaming tool call. Text is sent to the caller as it arrives. */
 export async function streamChat(
   p: Provider, messages: ChatMessage[], tools: { type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } }[],
-  onText: (delta: string) => void, opts: { maxTokens?: number; toolChoice?: "none"; timeoutMs?: number } = {},
+  onText: (delta: string) => void, opts: { maxTokens?: number; toolChoice?: "none"; timeoutMs?: number; stream?: boolean } = {},
 ): Promise<{ content: string; toolCalls: ToolCall[] }> {
-  const body = JSON.stringify({ model: p.model, messages, tools, stream: true, temperature: 0.2, max_tokens: opts.maxTokens ?? 1800, ...(opts.toolChoice ? { tool_choice: opts.toolChoice } : {}) });
+  // stream: false asks for one JSON answer. publik-fast stalls mid tool call when streamed (verified against the live
+  // API: the stream opens a tool call and never sends its arguments or [DONE]), while the same request unstreamed returns at once.
+  const stream = opts.stream ?? !(p.kind === "publik" && p.model === MODELS.fast);
+  const body = JSON.stringify({ model: p.model, messages, tools, stream, temperature: 0.2, max_tokens: opts.maxTokens ?? 1800, ...(opts.toolChoice ? { tool_choice: opts.toolChoice } : {}) });
   if (Buffer.byteLength(body) > MAX_BYTES) throw new HttpError(413, "too_large", "That conversation is too large. Start a new chat.");
   let res: Response;
   try {
@@ -143,12 +146,25 @@ export async function streamChat(
     if (res.status >= 500) throw new AiRequestError(503, "ai_unavailable", "The AI is having trouble right now. Please try again in a minute.", detail);
     throw new AiRequestError(502, "ai_error", "The AI couldn't process this. Please try again.", detail);
   }
+  if (!stream) {
+    let message: { content?: unknown; tool_calls?: unknown } | undefined;
+    try { message = ((await res.json()) as { choices?: { message?: typeof message }[] }).choices?.[0]?.message; } catch (e) { throw transportError(p, e); }
+    const content = typeof message?.content === "string" ? message.content : "";
+    const toolCalls = (Array.isArray(message?.tool_calls) ? message.tool_calls : []).map((c: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+      id: String(c?.id ?? ""), type: "function" as const,
+      function: { name: String(c?.function?.name ?? ""), arguments: typeof c?.function?.arguments === "string" ? c.function.arguments : JSON.stringify(c?.function?.arguments ?? {}) },
+    }));
+    if (content) onText(content);
+    return { content, toolCalls };
+  }
   if (!res.body) throw new HttpError(502, "ai_error", "The AI returned an empty answer. Please try again.");
   const reader = res.body.getReader(), decoder = new TextDecoder();
   let buffer = "", content = "";
   const calls = new Map<number, ToolCall>();
+  let finished = false; // the provider said it is done; some keep the connection open afterwards
   const consume = (line: string) => {
-    if (!line.startsWith("data: ") || line === "data: [DONE]") return;
+    if (line === "data: [DONE]") { finished = true; return; }
+    if (!line.startsWith("data: ")) return;
     let data: any; // eslint-disable-line @typescript-eslint/no-explicit-any
     try { data = JSON.parse(line.slice(6)); } catch { return; }
     const delta = data.choices?.[0]?.delta;
@@ -169,6 +185,7 @@ export async function streamChat(
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n"); buffer = lines.pop() ?? "";
       for (const line of lines) consume(line.trimEnd());
+      if (finished) { void reader.cancel().catch(() => {}); break; }
     }
   } catch (e) {
     throw transportError(p, e); // the stream was cut: a timeout mid-answer is still a timeout

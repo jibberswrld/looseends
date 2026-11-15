@@ -35,7 +35,9 @@ const fakeAI = createServer(async (req, res) => {
   const b = JSON.parse(Buffer.concat(chunks)); requests.push(b);
   b.alias = req.headers["x-publik-model"]; // the publik alias the app asked for (the mock rewrites b.model)
   const system = String(b.messages[0].content);
-  b.job = b.stream ? "agent" : system.startsWith("You choose which AI model tier") ? "router" : system.includes("sort a person's recent emails") ? "triage"
+  // Agent calls carry tools. publik-fast ones are not streamed (its streamed tool calls stall on the live API).
+  const agentJob = Array.isArray(b.tools) && b.tools.length > 0;
+  b.job = agentJob ? "agent" : system.startsWith("You choose which AI model tier") ? "router" : system.includes("sort a person's recent emails") ? "triage"
     : system.startsWith("You write short, clear, polite replies") ? "draft" : system.includes("own to-do queue") ? "ask" : "extraction";
   if (b.job === "router") {
     // Stand-in for the small model's judgement, keyed on the exact test requests.
@@ -45,7 +47,7 @@ const fakeAI = createServer(async (req, res) => {
     const tier = request.startsWith("Reply to Riverside") || request === "test fast malformed" ? "fast" : "balanced";
     return json(res, { choices: [{ message: { content: JSON.stringify({ tier }) } }] });
   }
-  if (!b.stream) {
+  if (!agentJob) {
     if (String(b.messages[0].content).includes("sort a person's recent emails")) {
       // Inbox triage sees metadata only; this stand-in picks the senders a person is waiting on.
       const list = JSON.parse(String(b.messages[1].content).match(/<emails>\n([\s\S]*)\n<\/emails>/)[1]);
@@ -93,6 +95,8 @@ const fakeAI = createServer(async (req, res) => {
       calls = [tool("run_tool", isWrite(user) ? { tool: "GMAIL_SEND_EMAIL", arguments: { recipient_email: "mock@example.test", subject: "Fixture", body: "Only a mock." }, title: "Send mock email" } : { tool: "GMAIL_FETCH_EMAILS", arguments: { max_results: 1, query: "in:inbox" } })];
     }
   }
+  if (b.alias === "publik-fast") assert.equal(b.stream, false, "publik-fast agent calls must not be streamed");
+  if (!b.stream) return json(res, { choices: [{ message: calls.length ? { content: null, tool_calls: calls } : { content } }] });
   res.writeHead(200, { "content-type": "text/event-stream" });
   res.end(`data: ${JSON.stringify({ choices: [{ delta: calls.length ? { tool_calls: calls.map((c, index) => ({ ...c, index })) } : { content } }] })}\n\ndata: [DONE]\n\n`);
 });
@@ -187,11 +191,11 @@ try {
     assert(requests.filter((r) => r.job === "extraction").every((r) => r.alias === "publik-balanced"));
     assert.deepEqual(scans.flatMap((r) => r.data).filter((e) => e.type === "email").map((e) => e.from), ["Riverside Dental", "Maya Okafor", "City Power & Light"]);
     extractionDelay = 0;
-    const beforeRepeat = requests.filter((r) => !r.stream).length;
+    const beforeRepeat = requests.filter((r) => r.job !== "agent").length;
     const repeat = await api("/api/inbox/scan", "POST");
     const repeatDone = repeat.data.find((e) => e.type === "done");
     assert.equal(repeatDone.skipped, 25); assert.equal(repeatDone.scanned, 0); assert.equal(repeatDone.summary, "No new emails to check.");
-    assert.equal(requests.filter((r) => !r.stream).length - beforeRepeat, 0);
+    assert.equal(requests.filter((r) => r.job !== "agent").length - beforeRepeat, 0);
     const checkedAt = Date.parse((await api("/api/connections")).data.gmail.lastScanAt);
     assert(Math.abs(Date.now() - checkedAt) < 60_000, "Last checked is fresh right after a scan");
     console.log("PASS concurrent inbox scan rejected; 25 mock emails, one publik-fast triage call, three balanced extractions; repeat finds nothing new");
@@ -226,7 +230,7 @@ try {
     const created = local.data.filter((e) => e.type === "tasks").flatMap((e) => e.tasks);
     assert(created.some((t) => t.title === "Approved local task")); assert(!created.some((t) => t.title === "Must not run"));
     assert(created.some((t) => t.title === "Review mock message"), "find_todos_in_text ran through the capture pipeline");
-    const feedback = requests.findLast((r) => r.stream && r.messages.some((m) => m.role === "tool")).messages.filter((m) => m.role === "tool").map((m) => m.content).join("\n");
+    const feedback = requests.findLast((r) => r.job === "agent" && r.messages.some((m) => m.role === "tool")).messages.filter((m) => m.role === "tool").map((m) => m.content).join("\n");
     assert.match(feedback, /only be checked once per turn/); assert.match(feedback, /Only four tool calls/); assert.match(feedback, /No new emails to check/);
     const refreshed = local.data.find((e) => e.type === "connections");
     assert(refreshed && refreshed.connections.gmail.lastScanAt, "An agent inbox check refreshes the last-checked time");
