@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowSquareOut, CaretDown, Check, CheckCircle, NotePencil, WarningCircle, X, XCircle } from "@phosphor-icons/react";
+import { ArrowSquareOut, CaretDown, Check, CheckCircle, WarningCircle, X, XCircle } from "@phosphor-icons/react";
 import type { AgentAction, AgentMessage, AgentToolStep } from "@/lib/types";
 import { LogoMark } from "../brand";
 import { Button, cx, Spinner } from "../ui";
@@ -16,8 +16,8 @@ const ease = [0.16, 1, 0.3, 1] as const;
 /* ------------------------------ The conversation ------------------------------ */
 
 /** The conversation, inside the composer card. Scrolls on its own so the page under it stays put. */
-export function Thread({ onOpenTask }: { onOpenTask: (id: string) => void }) {
-  const { messages, busy, liveId, notice, reset } = useAgent();
+export function Thread({ onOpenTask, empty }: { onOpenTask: (id: string) => void; empty: ReactNode }) {
+  const { messages, busy, liveId, notice } = useAgent();
   const box = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const reduce = useReducedMotion();
@@ -31,6 +31,7 @@ export function Thread({ onOpenTask }: { onOpenTask: (id: string) => void }) {
     const el = box.current;
     const inner = el?.firstElementChild;
     if (!el || !inner) return;
+    if (!messages.length) { el.scrollTop = 0; return; }
     const pin = () => {
       if (stick.current) el.scrollTop = el.scrollHeight;
     };
@@ -38,20 +39,12 @@ export function Thread({ onOpenTask }: { onOpenTask: (id: string) => void }) {
     const ro = new ResizeObserver(pin);
     ro.observe(inner);
     return () => ro.disconnect();
-  }, []);
+  }, [messages.length]);
+
+  useEffect(() => { if (!messages.length) stick.current = true; }, [messages.length]);
 
   return (
-    <div className="border-b border-line">
-      <div className="flex h-10 items-center justify-between pr-2 pl-5">
-        <span className="text-[12.5px] font-medium text-muted">Assistant</span>
-        <button
-          onClick={() => void reset()}
-          disabled={busy}
-          className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12.5px] font-medium text-muted transition-colors duration-150 hover:bg-ink/[0.045] hover:text-ink disabled:opacity-40"
-        >
-          <NotePencil size={14} /> New chat
-        </button>
-      </div>
+    <div className="flex min-h-0 flex-1 flex-col border-b border-line">
       <div
         ref={box}
         onScroll={(e) => {
@@ -59,9 +52,10 @@ export function Thread({ onOpenTask }: { onOpenTask: (id: string) => void }) {
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
         aria-live="polite"
-        className="max-h-[max(280px,calc(100dvh-330px))] overflow-y-auto lg:max-h-[max(280px,calc(100dvh-262px))] overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_14px)]"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
       >
-        <div className="space-y-5 px-5 pt-1 pb-5 sm:px-7">
+        <div className={cx("px-5 py-5 sm:px-7", messages.length || notice ? "space-y-5" : "flex min-h-full flex-col items-center justify-center")}>
+          {!messages.length && !notice ? empty : null}
           <AnimatePresence initial={false}>
             {messages.map((m) => (
               <motion.div key={m.id} initial={reduce ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.24, ease }}>

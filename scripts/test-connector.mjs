@@ -13,14 +13,14 @@ assert(!process.env.DATABASE_URL && !process.env.COMPOSIO_API_KEY && !process.en
 const scratch = await mkdtemp(join(tmpdir(), "looseends-connector-"));
 const compile = (source) => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText.replace(/from "\.\/([^".]+)"/g, 'from "./$1.mjs"');
 const calls = [], deleted = [];
-let failDelete = false, failTool = false;
+let failDelete = false, failTool = false, emailCount = 1;
 globalThis.__sdkFixture = {
   async create(userId, _config, options) { assert(options.signal); calls.push(userId); return new globalThis.__sdkFixture.Session(); },
   Session: class {
     async toolkits(_options, request) { assert(request.signal); return { items: [{ slug: "gmail", name: "Gmail", connection: { isActive: true } }] }; }
     async authorize(_toolkit, options, request) { assert(request.signal); assert.match(options.callbackUrl, /\/connected\?app=gmail$/); return { redirectUrl: "https://authorize.example.test" }; }
     async search(_query, request) { assert(request.signal); return { results: [{ primaryToolSlugs: ["GMAIL_FETCH_EMAILS"], relatedToolSlugs: [] }] }; }
-    async execute(slug, args, _options, request) { assert(request.signal); calls.push({ slug, args }); return failTool ? { resultType: "failed", error: "sensitive vendor error must never be logged" } : { resultType: "completed", data: { messages: [{ messageText: "Fixture email", payload: {}, attachmentList: [] }] } }; }
+    async execute(slug, args, _options, request) { assert(request.signal); calls.push({ slug, args }); return failTool ? { resultType: "failed", error: "sensitive vendor error must never be logged" } : { resultType: "completed", data: { messages: Array.from({ length: emailCount }, (_, i) => ({ messageId: `mail-${i}`, messageText: "Fixture email ".repeat(600), payload: {}, attachmentList: [] })) } }; }
   },
   tools: { async getRawComposioToolBySlug(slug, _options, request) { assert(request.signal); return { slug, name: "Fixture", toolkit: { slug: slug === "FORBIDDEN" ? "unsupported" : "gmail" }, inputParameters: { type: "object" }, tags: ["readOnlyHint"] }; } },
   connectedAccounts: {
@@ -53,6 +53,15 @@ try {
     assert.equal(calls.find((c) => typeof c === "object").args.user_id, "me");
     assert(calls.filter((c) => typeof c === "string").every((c) => c === "looseends_session-owner"));
     assert.equal((await connector.connectorRun("FORBIDDEN", {})).ok, false);
+    emailCount = 50;
+    const large = await connector.connectorRun("GMAIL_FETCH_EMAILS", { max_results: 50 });
+    assert(large.ok); assert.equal(large.data.data.messages.length, 50);
+    assert(JSON.stringify(large.data.data).length > 200_000);
+    assert.equal(large.data.data.truncated, undefined);
+    emailCount = 200;
+    const oversized = await connector.connectorRun("GMAIL_FETCH_EMAILS", { max_results: 200 });
+    assert(oversized.ok); assert.equal(oversized.data.data.truncated, true);
+    assert.equal(oversized.data.data.result, undefined, "Do not return incomplete JSON as evidence");
     failTool = true; assert.equal((await connector.connectorRun("GMAIL_FETCH_EMAILS", {})).code, "tool_failed");
     assert((await connector.connectorDisconnectAll()).ok); assert.deepEqual(deleted, ["first-page", "second-page"]);
     failDelete = true;
@@ -61,6 +70,7 @@ try {
     assert(errors.every((e) => !e.includes("sensitive")));
   } finally { globalThis.fetch = oldFetch; delete process.env.VERCEL; delete process.env.COMPOSIO_API_KEY; }
   console.log("PASS production connector uses session identity in-process; mock override ignored; mailbox and toolkit guards hold");
+  console.log("PASS 50 long Gmail bodies survive connector normalization; oversized results give an explicit error without partial JSON");
   console.log("PASS connected-account deletion paginates all accounts and surfaces failure without vendor error logging");
 
   let dnsAnswer = "93.184.216.34", status = 200, sent = 0;

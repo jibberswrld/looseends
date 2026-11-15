@@ -45,7 +45,7 @@ const fakeAI = createServer(async (req, res) => {
     if (request === "test router failure") { res.writeHead(500); return res.end("upstream down"); }
     if (request === "test router garbage") return json(res, { choices: [{ message: { content: "probably the fast one" } }] });
     const tier = request.startsWith("Reply to Riverside") || request === "test fast malformed" ? "fast" : "balanced";
-    return json(res, { choices: [{ message: { content: JSON.stringify({ tier }) } }] });
+    return json(res, { choices: [{ message: { content: JSON.stringify({ tier, needsRead: request.includes("50 emails") || request === "test no evidence" || request === "test oversized read" || request === "What needs a reply?" }) } }] });
   }
   if (!agentJob) {
     if (String(b.messages[0].content).includes("sort a person's recent emails")) {
@@ -77,7 +77,27 @@ const fakeAI = createServer(async (req, res) => {
   if (b.tool_choice === "none" && user === "test wander") content0 = "Here is what I found so far: two open tasks.";
   let calls = [], content = content0 ?? (user === "What needs a reply?" ? "**Riverside Dental** is waiting on you: they asked you to confirm Thursday's cleaning by replying to their email." : "Mock tool flow completed.");
   if (b.tool_choice !== "none") {
-    if (last.role === "user") {
+    if (user === "test no evidence") {
+      content = "I checked your email: Jira sent a migration notice.";
+    } else if (user.includes("50 emails")) {
+      const results = b.messages.filter((m) => m.role === "tool").map((m) => JSON.parse(m.content));
+      const pages = results.filter((r) => Array.isArray(r.messages));
+      if (last.role === "user") content = "Jira sent a migration notice on January 21."; // deliberately ungrounded: must never stream to the browser
+      else if (!results.length) calls = [tool("find_tools", { query: "gmail fetch" })];
+      else if (!pages.length || pages.reduce((n, p) => n + p.messages.length, 0) < 50) {
+        calls = [tool("run_tool", { tool: "GMAIL_FETCH_EMAILS", arguments: { max_results: user.startsWith("Page") ? 25 : 50, query: "in:inbox", ...(pages.length ? { page_token: pages.at(-1).nextPageToken } : {}) } })];
+      } else {
+        assert.equal(pages.reduce((n, p) => n + p.returned, 0), 50);
+        assert.equal(new Set(pages.flatMap((p) => p.messages.map((m) => m.messageId))).size, 50);
+        assert(pages.every((p) => p.messages.every((m) => m.contentScope.startsWith("snippet only"))));
+        if (!user.startsWith("Page")) assert(b.messages.some((m) => m.role === "tool" && m.content.length > 12_000));
+        content = `Reviewed ${pages.reduce((n, p) => n + p.returned, 0)} email snippets. The last is ${pages.at(-1).messages.at(-1).subject}.`;
+      }
+    } else if (user === "test oversized read") {
+      if (!b.messages.some((m) => m.role === "tool")) calls = [tool("find_tools", { query: "gmail fetch" })];
+      else if (!b.messages.some((m) => m.tool_calls?.some((t) => t.function.name === "run_tool"))) calls = [tool("run_tool", { tool: "GMAIL_FETCH_EMAILS", arguments: { max_results: 500, query: "in:inbox" } })];
+      else content = "I read a message that was never returned.";
+    } else if (last.role === "user") {
       if (user === "test wander") calls = [tool("list_tasks", {})];
       else if (user === "test fast malformed") calls = b.alias === "publik-fast" ? [{ ...tool("create_task", {}), function: { name: "create_task", arguments: "{\"title\": \"Unfinished" } }] : [tool("create_task", { title: "Escalated task" })];
       else if (user.startsWith("test local removals ")) calls = [tool("complete_task", { id: user.split(" ").at(-1) }), tool("dismiss_task", { id: user.split(" ").at(-1) })];
@@ -143,6 +163,26 @@ try {
     assert.equal(read.data.filter((e) => e.type === "step" && e.step.status === "done").length, 2);
     assert.deepEqual(requests.map((r) => [r.job, r.alias]), [["router", "publik-fast"], ["agent", "publik-balanced"], ["agent", "publik-balanced"], ["agent", "publik-balanced"]]);
     console.log("PASS router (publik-fast) sends a read to balanced; find_tools → run_tool read with compact, valid schemas");
+    await fetch(`${connector}/mock/email-count/60`);
+    const texts = (r) => r.data.filter((e) => e.type === "text").map((e) => e.delta).join("");
+    for (const request of ["Summarize my last 50 emails", "Page through my last 50 emails"]) {
+      const r = await api("/api/agent", "POST", { message: request });
+      assert(!r.data.some((e) => e.type === "error"), JSON.stringify(r));
+      assert.match(texts(r), /Reviewed 50 email snippets/);
+      assert.match(texts(r), /Fixture subject 50/);
+      assert(!texts(r).includes("Jira"), "Ungrounded text must never reach the stream");
+    }
+    const unsupported = await api("/api/agent", "POST", { message: "test no evidence" });
+    assert.match(texts(unsupported), /couldn't verify/);
+    assert(!texts(unsupported).includes("Jira"));
+    await fetch(`${connector}/mock/email-count/250`);
+    const oversized = await api("/api/agent", "POST", { message: "test oversized read" });
+    assert.match(texts(oversized), /couldn't verify/);
+    assert(!texts(oversized).includes("never returned"));
+    const oversizedResult = requests.findLast((r) => r.job === "agent" && r.messages.findLast((m) => m.role === "user")?.content === "test oversized read").messages.findLast((m) => m.role === "tool");
+    assert.equal(JSON.parse(oversizedResult.content).truncated, true);
+    await fetch(`${connector}/mock/email-count/0`);
+    console.log("PASS 50-message reads preserve valid JSON above 12KB, paginate, and suppress unsupported email claims");
     const write = await api("/api/agent", "POST", { message: "test connected write" });
     const pending = write.data.find((e) => e.type === "action").action;
     assert.equal(pending.status, "pending"); assert.equal((await (await fetch(`${connector}/mock/calls`)).json()).calls.length, 0);
@@ -212,8 +252,8 @@ try {
     assert(!needsSent.messages.some((m) => m.tool_calls?.some((t) => t.function.name === "check_inbox")), "No inbox check as a side effect of a question");
     const listing = needsSent.messages.findLast((m) => m.role === "tool");
     const compact = JSON.parse(listing.content);
-    assert.deepEqual(Object.keys(compact.messages[0]).sort(), ["date", "from", "labels", "messageId", "snippet", "subject", "threadId", "to"]);
-    assert(compact.messages[0].snippet.length <= 300 && !listing.content.includes("messageText"));
+    assert.deepEqual(Object.keys(compact.messages[0]).sort(), ["contentScope", "date", "from", "labels", "messageId", "snippet", "subject", "threadId", "to"]);
+    assert(compact.messages[0].snippet.length <= 600 && !listing.content.includes("messageText"));
     assert(!needs.events.some((e) => e.type === "action" || e.type === "error"));
     assert.match(needs.events.filter((e) => e.type === "text").map((e) => e.delta).join(""), /Riverside Dental/);
     console.log("PASS 'What needs a reply?': router + 3 balanced calls, no inbox check, compact Gmail listing, an answer");
