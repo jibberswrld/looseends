@@ -440,18 +440,7 @@ async function decideActionTurn(ctx: Ctx, id: string, decision: "approve" | "can
   const error = r.ok ? null : r.maybeDone ? "The result is uncertain. Check the connected app before trying again." : r.message;
   const updated = (await sql`update agent_actions set status = ${r.ok ? "done" : "failed"}, result = ${result}, error = ${error} where id = ${id} returning *`)[0];
   emit({ type: "action", messageId: ownerId, action: actionOf(updated) });
-  const follow = await insertMessage(ctx.user.id, "assistant"); emit({ type: "message", message: follow });
-  try {
-    const provider = resolveProvider(ctx.session, ctx.user, "fast"); // one short sentence about the result
-    await streamChat(provider, [
-      { role: "system", content: `${prompt(ctx)}\nReply with one short sentence about the result. No tool calls.` },
-      { role: "user", content: `Action ${row.title}: ${r.ok ? `completed. Result: ${tiny(r.data.data, 1000)}` : `failed: ${error}`}` },
-    ], tools, (delta) => { follow.text += delta; emit({ type: "text", messageId: follow.id, delta }); }, { toolChoice: "none", maxTokens: 100 });
-  } catch {
-    follow.text = r.ok ? "Done." : `That didn't work: ${error}`;
-    emit({ type: "text", messageId: follow.id, delta: follow.text });
-  }
-  await persist(follow); emit({ type: "done", messageId: follow.id });
+  emit({ type: "done", messageId: ownerId });
 }
 
 export function agentResponse(run: (emit: (event: AgentEvent) => void) => Promise<void>): Response {
