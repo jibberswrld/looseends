@@ -21,7 +21,7 @@ const BODY_LIMIT = 8_000;
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", "#39": "'" };
 
 /** Email bodies often arrive as HTML. Evidence quotes need plain text. */
-function plainText(s: string): string {
+export function plainText(s: string): string {
   let t = s.replace(/\r\n/g, "\n");
   if (/<(html|body|div|p|br|table|span|a)\b/i.test(t)) {
     t = t
@@ -121,6 +121,10 @@ async function* scanInboxWork(ctx: Ctx): AsyncGenerator<ScanEvent> {
       if (!pageToken) break;
     }
 
+    // The inbox has been read: that is the "last checked" time, even if a later AI step stops early.
+    const stamp = (await sql`update users set gmail_last_scan_at = clock_timestamp() where id = ${user.id} returning gmail_last_scan_at`)[0];
+    user.gmail_last_scan_at = stamp?.gmail_last_scan_at ?? new Date().toISOString();
+
     // More new mail than we read in full: one cheap metadata-only call (publik-fast) picks the likely obligations.
     let toRead = candidates.slice(0, MAX_EMAILS);
     if (candidates.length > MAX_EMAILS) {
@@ -163,8 +167,6 @@ async function* scanInboxWork(ctx: Ctx): AsyncGenerator<ScanEvent> {
         return;
       }
     }
-    const stamp = (await sql`update users set gmail_last_scan_at = now() where id = ${user.id} returning gmail_last_scan_at`)[0];
-    user.gmail_last_scan_at = stamp?.gmail_last_scan_at ?? new Date().toISOString();
     await track("inbox_scanned", { userId: user.id, sessionId: session.id, props: { scanned, found } });
     yield { type: "done", scanned, found, skipped, summary: summarize(scanned, found, withTasks) };
   } finally {

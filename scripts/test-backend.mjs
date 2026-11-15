@@ -70,11 +70,13 @@ const fakeAI = createServer(async (req, res) => {
     return json(res, { choices: [{ message: { content: JSON.stringify(extraction) } }] });
   }
   const last = b.messages.at(-1);
+  let content0 = null;
   const user = b.messages.findLast((m) => m.role === "user")?.content ?? "";
-  let calls = [], content = user === "What needs a reply?" ? "**Riverside Dental** is waiting on you: they asked you to confirm Thursday's cleaning by replying to their email. I added it to your list." : "Mock tool flow completed.";
+  if (b.tool_choice === "none" && user === "test wander") content0 = "Here is what I found so far: two open tasks.";
+  let calls = [], content = content0 ?? (user === "What needs a reply?" ? "**Riverside Dental** is waiting on you: they asked you to confirm Thursday's cleaning by replying to their email." : "Mock tool flow completed.");
   if (b.tool_choice !== "none") {
     if (last.role === "user") {
-      if (user === "What needs a reply?") calls = [tool("list_tasks", {}), tool("check_inbox", {})];
+      if (user === "test wander") calls = [tool("list_tasks", {})];
       else if (user === "test fast malformed") calls = b.alias === "publik-fast" ? [{ ...tool("create_task", {}), function: { name: "create_task", arguments: "{\"title\": \"Unfinished" } }] : [tool("create_task", { title: "Escalated task" })];
       else if (user.startsWith("test local removals ")) calls = [tool("complete_task", { id: user.split(" ").at(-1) }), tool("dismiss_task", { id: user.split(" ").at(-1) })];
       else if (user === "test local limits") calls = [tool("create_task", { title: "Approved local task" }), tool("check_inbox", {}), tool("check_inbox", {}), tool("find_todos_in_text", { text: "Please review the mock document." }), tool("create_task", { title: "Must not run" })];
@@ -82,7 +84,8 @@ const fakeAI = createServer(async (req, res) => {
       else if (user === "test long next step") calls = [tool("create_task", { title: "Short", nextStep: "N".repeat(301) })];
       else if (user === "test boundary task") calls = [tool("create_task", { title: "T".repeat(120), nextStep: "N".repeat(300) })];
       else calls = [tool("find_tools", { query: isWrite(user) ? "gmail send" : "gmail fetch" })];
-    } else if (last.role === "tool" && b.messages.some((m) => m.tool_calls?.some((t) => t.function.name === "find_tools")) && !b.messages.some((m) => m.tool_calls?.some((t) => t.function.name === "run_tool"))) {
+    } else if (user === "test wander") calls = [tool("list_tasks", {})];
+    else if (last.role === "tool" && b.messages.some((m) => m.tool_calls?.some((t) => t.function.name === "find_tools")) && !b.messages.some((m) => m.tool_calls?.some((t) => t.function.name === "run_tool"))) {
       const meta = JSON.parse(last.content);
       assert(meta.some((t) => t.slug === (isWrite(user) ? "GMAIL_SEND_EMAIL" : "GMAIL_FETCH_EMAILS")));
       assert(last.content.length < 10_000);
@@ -189,6 +192,8 @@ try {
     const repeatDone = repeat.data.find((e) => e.type === "done");
     assert.equal(repeatDone.skipped, 25); assert.equal(repeatDone.scanned, 0); assert.equal(repeatDone.summary, "No new emails to check.");
     assert.equal(requests.filter((r) => !r.stream).length - beforeRepeat, 0);
+    const checkedAt = Date.parse((await api("/api/connections")).data.gmail.lastScanAt);
+    assert(Math.abs(Date.now() - checkedAt) < 60_000, "Last checked is fresh right after a scan");
     console.log("PASS concurrent inbox scan rejected; 25 mock emails, one publik-fast triage call, three balanced extractions; repeat finds nothing new");
     const draftTask = (await api("/api/tasks")).data.tasks.find((t) => t.title === "Review mock message");
     const draftFrom = requests.length;
@@ -196,10 +201,25 @@ try {
     assert.deepEqual(requests.slice(draftFrom).map((r) => [r.job, r.alias]), [["draft", "publik-fast"]]);
     console.log("PASS Draft a reply uses publik-fast");
     const needs = await turn("What needs a reply?");
-    assert.deepEqual(needs.calls.slice(0, 2), [["router", "publik-fast"], ["agent", "publik-balanced"]]);
-    assert(needs.calls.filter((c) => c[0] === "agent").every((c) => c[1] === "publik-balanced"));
-    assert(!needs.events.some((e) => e.type === "action"));
-    console.log("PASS 'What needs a reply?' is routed to balanced and checks the inbox without a card");
+    assert.deepEqual(needs.calls, [["router", "publik-fast"], ["agent", "publik-balanced"], ["agent", "publik-balanced"], ["agent", "publik-balanced"]], "Question turn: router + at most 3 balanced calls");
+    const needsSent = requests.at(-1);
+    assert.match(needsSent.messages[0].content, /never to answer a question/);
+    assert.match(needsSent.tools.find((t) => t.function.name === "check_inbox").function.description, /never to answer a question/);
+    assert(!needsSent.messages.some((m) => m.tool_calls?.some((t) => t.function.name === "check_inbox")), "No inbox check as a side effect of a question");
+    const listing = needsSent.messages.findLast((m) => m.role === "tool");
+    const compact = JSON.parse(listing.content);
+    assert.deepEqual(Object.keys(compact.messages[0]).sort(), ["date", "from", "labels", "messageId", "snippet", "subject", "threadId", "to"]);
+    assert(compact.messages[0].snippet.length <= 300 && !listing.content.includes("messageText"));
+    assert(!needs.events.some((e) => e.type === "action" || e.type === "error"));
+    assert.match(needs.events.filter((e) => e.type === "text").map((e) => e.delta).join(""), /Riverside Dental/);
+    console.log("PASS 'What needs a reply?': router + 3 balanced calls, no inbox check, compact Gmail listing, an answer");
+    const wander = await turn("test wander");
+    assert.deepEqual(wander.calls.map((c) => c[0]), ["router", "agent", "agent", "agent", "agent", "agent", "agent"], "Five rounds, then one no-tools answer");
+    assert.equal(requests.at(-1).tool_choice, "none");
+    const wanderText = wander.events.filter((e) => e.type === "text").map((e) => e.delta).join("");
+    assert.match(wanderText, /Here is what I found so far/); assert.match(wanderText, /I stopped early to keep this quick/);
+    assert(!wander.events.some((e) => e.type === "error"));
+    console.log("PASS a turn that hits the round cap still answers from what it read, with an honest note");
     const before = (await api("/api/tasks")).data.tasks;
     const local = await api("/api/agent", "POST", { message: "test local limits" });
     assert(!local.data.some((e) => e.type === "action"), "Adding tasks, finding to-dos and checking the inbox run without approval cards");
@@ -220,7 +240,7 @@ try {
     const completed = await api(`/api/agent/actions/${removalCards[0].id}`, "POST", { decision: "approve" });
     assert.equal(completed.data.find((e) => e.type === "tasks").tasks[0].status, "completed");
     console.log("PASS complete_task and dismiss_task still wait for approval and only change the task once approved");
-    for (let i = 0; i < 15; i++) assert.equal((await api("/api/inbox/scan", "POST")).status, 200);
+    for (let i = 0; i < 16; i++) assert.equal((await api("/api/inbox/scan", "POST")).status, 200);
     const limited = await api("/api/inbox/scan", "POST"); assert.equal(limited.status, 429); assert.match(limited.data.error.message, /20 per hour/);
     console.log("PASS scan request 21 returns HTTP 429 with a clear hourly limit");
     const ownURL = await api("/api/me", "PATCH", { ownKey: { baseUrl: "https://127.0.0.1/v1", apiKey: randomUUID() } });

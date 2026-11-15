@@ -221,6 +221,26 @@ try {
   globalThis.__backendCtx = ctx;
   assert.deepEqual(seen.map(([j, model, url]) => [j, model, url]), [["agent", "my-own-model", "http://127.0.0.1:9/v1/chat/completions"]]);
   console.log("PASS own-key sessions make no router call and use the configured model");
+  // A slow AI must read as slow, not as a connection problem, and a turn cut short still answers from what it read.
+  let agentRounds = 0;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).endsWith("/status")) return Response.json({ gmail: true, googlecalendar: false, apps: [{ slug: "gmail", name: "Gmail", connected: true }] });
+    const body = JSON.parse(init.body);
+    if (!body.stream) return Response.json({ choices: [{ message: { content: JSON.stringify({ tier: "balanced" }) } }] });
+    if (body.tool_choice === "none") return sse("From what I read: Riverside Dental is waiting on a reply.");
+    if (agentRounds++ === 0) return new Response(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "list_tasks", arguments: "{}" } }] } }] })}\n\ndata: [DONE]\n\n`);
+    return new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true }));
+  };
+  AbortSignal.timeout = (ms) => originalTimeout(ms === 240_000 ? ms : 60);
+  agentRounds = 1; // the first round hangs: nothing read yet, so the timeout is the error
+  await assert.rejects(converse(ctx, "What needs a reply?", () => {}), (e) => e.code === "ai_timeout" && !/reachable|connection/i.test(e.message));
+  agentRounds = 0;
+  const cut = []; await converse(ctx, "What needs a reply?", (e) => cut.push(e));
+  AbortSignal.timeout = originalTimeout;
+  const cutText = cut.filter((e) => e.type === "text").map((e) => e.delta).join("");
+  assert.match(cutText, /From what I read: Riverside Dental/); assert.match(cutText, /took too long, so I stopped early/);
+  assert(!cut.some((e) => e.type === "error")); assert(!/reachable|connection/i.test(cutText));
+  console.log("PASS a per-call AI timeout reads as 'took too long', not a connection problem; a turn cut short answers from what it read");
   // Restore the simple extraction fake used by the remaining timeout/race checks.
   globalThis.fetch = async (_input, init) => {
     if (holdAI) return new Promise((_, reject) => {

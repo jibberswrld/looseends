@@ -51,6 +51,14 @@ export class AiRequestError extends HttpError {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** One OpenAI-compatible chat completion. Returns the assistant text. Throws HttpError with a user-facing message. */
+/** A failed request or stream: the turn's deadline, this call's own timeout, or a real connection failure. Never report a timeout as "not reachable". */
+function transportError(p: Provider, e: unknown): HttpError {
+  if (e instanceof HttpError) return e;
+  checkDeadline();
+  if (e instanceof Error && e.name === "TimeoutError") return new HttpError(504, "ai_timeout", "The AI took too long to answer. Please try again.");
+  return new HttpError(503, "ai_unreachable", p.kind === "publik" ? "publik is not reachable. Check your connection." : "Your AI provider is not reachable right now.");
+}
+
 /** `timeoutMs` (default 60 s) bounds each attempt; `retry: false` makes a single attempt (no retry after a network error, 429 or 5xx). */
 export async function chat(p: Provider, messages: ChatMessage[], opts: { json?: boolean; maxTokens?: number; temperature?: number; timeoutMs?: number; retry?: boolean } = {}): Promise<string> {
   const body = JSON.stringify({
@@ -78,7 +86,7 @@ export async function chat(p: Provider, messages: ChatMessage[], opts: { json?: 
       if (e instanceof HttpError) throw e;
       checkDeadline();
       if (attempt < attempts - 1) { await sleep(1500); continue; }
-      throw new HttpError(503, "ai_unreachable", p.kind === "publik" ? "publik is not reachable. Check your connection." : "Your AI provider is not reachable right now. Try again in a moment.");
+      throw transportError(p, e);
     }
     const text = await res.text();
     let parsed: Record<string, any> = {}; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -109,19 +117,17 @@ export async function chat(p: Provider, messages: ChatMessage[], opts: { json?: 
 /** OpenAI-compatible streaming tool call. Text is sent to the caller as it arrives. */
 export async function streamChat(
   p: Provider, messages: ChatMessage[], tools: { type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } }[],
-  onText: (delta: string) => void, opts: { maxTokens?: number; toolChoice?: "none" } = {},
+  onText: (delta: string) => void, opts: { maxTokens?: number; toolChoice?: "none"; timeoutMs?: number } = {},
 ): Promise<{ content: string; toolCalls: ToolCall[] }> {
   const body = JSON.stringify({ model: p.model, messages, tools, stream: true, temperature: 0.2, max_tokens: opts.maxTokens ?? 1800, ...(opts.toolChoice ? { tool_choice: opts.toolChoice } : {}) });
   if (Buffer.byteLength(body) > MAX_BYTES) throw new HttpError(413, "too_large", "That conversation is too large. Start a new chat.");
   let res: Response;
   try {
     res = await providerFetch(p, `${p.baseURL.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${p.apiKey}` }, body, signal: requestSignal(90_000),
+      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${p.apiKey}` }, body, signal: requestSignal(opts.timeoutMs ?? 90_000),
     });
   } catch (e) {
-    if (e instanceof HttpError) throw e;
-    checkDeadline();
-    throw new HttpError(503, "ai_unreachable", p.kind === "publik" ? "publik is not reachable. Check your connection." : "Your AI provider is not reachable right now.");
+    throw transportError(p, e);
   }
   if (!res.ok) {
     const raw = await res.text();
@@ -156,12 +162,16 @@ export async function streamChat(
       calls.set(index, call);
     }
   };
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n"); buffer = lines.pop() ?? "";
-    for (const line of lines) consume(line.trimEnd());
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n"); buffer = lines.pop() ?? "";
+      for (const line of lines) consume(line.trimEnd());
+    }
+  } catch (e) {
+    throw transportError(p, e); // the stream was cut: a timeout mid-answer is still a timeout
   }
   if (buffer) consume(buffer.trimEnd());
   return { content, toolCalls: [...calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call) };
