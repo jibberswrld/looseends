@@ -86,19 +86,23 @@ export default function TodayPage() {
     ) : null;
 
   return (
-    <main className={cx("mx-auto w-full px-4 pb-16 transition-[max-width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none sm:px-6", talking ? "max-w-[960px] pt-5 lg:pt-7" : "max-w-[760px]", talking ? null : empty && !busy ? "pt-[12vh] lg:pt-[18vh]" : "pt-10 lg:pt-14")}>
-      {/* In a conversation the chat is the page: the greeting steps aside and the card takes the width and the height. */}
-      <header className={cx(empty && "text-center", talking && "sr-only")}>
-        {empty ? <LogoMark size={40} className="mx-auto mb-5" /> : <p className="mb-2 text-[13.5px] text-muted">{greeting()}{handle ? `, ${handle}` : ""}</p>}
-        <h1 className="font-serif text-[38px] leading-[1.1] tracking-[-0.02em] sm:text-[44px]">
-          {!groups ? "Getting your list…" : empty ? (open!.length || history?.length ? "You're all caught up." : "What's on your plate?") : `${NUM[n] ?? n} ${n === 1 ? "thing needs" : "things need"} you.`}
-        </h1>
-        <p className={cx("mt-2.5 text-[15px] leading-relaxed text-ink-2", empty && "mx-auto max-w-[46ch]")}>
-          {empty ? "Ask about your inbox, or tell me what to do. I read your mail and connected apps, and nothing goes out until you approve it." : parts.join(" · ")}
-        </p>
-      </header>
+    <main className={cx("mx-auto w-full max-w-[880px] px-4 pb-16 transition-[padding-top] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none sm:px-6", talking ? "pt-5 lg:pt-7" : empty && !busy ? "pt-[12vh] lg:pt-[18vh]" : "pt-10 lg:pt-14")}>
+      {/* The page keeps one width. Starting a conversation folds the greeting away so the chat rises to the top; it grows with the conversation up to the height of the screen, and the list stays right under it. */}
+      <div inert={talking} className={cx("grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none", talking ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr]")}>
+        <div className="min-h-0 overflow-hidden">
+          <header className={cx("pb-7", empty && "text-center")}>
+            {empty ? <LogoMark size={40} className="mx-auto mb-5" /> : <p className="mb-2 text-[13.5px] text-muted">{greeting()}{handle ? `, ${handle}` : ""}</p>}
+            <h1 className="font-serif text-[38px] leading-[1.1] tracking-[-0.02em] sm:text-[44px]">
+              {!groups ? "Getting your list…" : empty ? (open!.length || history?.length ? "You're all caught up." : "What's on your plate?") : `${NUM[n] ?? n} ${n === 1 ? "thing needs" : "things need"} you.`}
+            </h1>
+            <p className={cx("mt-2.5 text-[15px] leading-relaxed text-ink-2", empty && "mx-auto max-w-[46ch]")}>
+              {empty ? "Ask about your inbox, or tell me what to do. I read your mail and connected apps, and nothing goes out until you approve it." : parts.join(" · ")}
+            </p>
+          </header>
+        </div>
+      </div>
 
-      <div className={cx(!talking && "mt-7")}>
+      <div>
         <Composer hasTasks={n > 0} onOpenTask={showTask} />
       </div>
 
