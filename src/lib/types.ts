@@ -215,7 +215,7 @@ export interface AgentMessage {
 //   cancel: marks it cancelled; no follow-up model call.
 export type AgentEvent =
   | { type: "message"; message: AgentMessage } // the user message as stored, or an assistant message as created
-  | { type: "text"; messageId: string; delta: string } // streamed assistant text
+  | { type: "text"; messageId: string; delta: string; reset?: boolean } // streamed assistant text; reset replaces the text so far (narration before a tool call)
   | { type: "step"; messageId: string; step: AgentToolStep } // a tool step started or finished (same id = update)
   | { type: "action"; messageId: string; action: AgentAction } // a proposed action, or an action's new status
   | { type: "tasks"; tasks: Task[] } // tasks the agent created or changed; the UI merges them into its list

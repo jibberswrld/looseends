@@ -6,7 +6,7 @@
 
 **The assistant for the everyday admin that slips through the cracks.**
 
-Paste an email, a text, a photo or a PDF, or connect Gmail. LooseEnds finds what you actually have to do, shows you the exact sentence it came from, and gets the next step ready: a reply, a calendar event, a reminder, or an action in one of your apps. Nothing is sent, posted, changed or deleted until you approve it.
+Connect Gmail and ask in plain words, or drop in a screenshot or a PDF. LooseEnds works across your inbox, calendar and other apps, finds what you actually have to do, shows you the exact sentence it came from, and gets the next step ready: a reply, a calendar event, a reminder, or an action in one of your apps. Nothing is sent, posted, changed or deleted until you approve it.
 
 It's built for the small stuff that piles up:
 
