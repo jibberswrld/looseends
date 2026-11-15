@@ -218,7 +218,7 @@ try {
     assert.match(needs.events.filter((e) => e.type === "text").map((e) => e.delta).join(""), /Riverside Dental/);
     console.log("PASS 'What needs a reply?': router + 3 balanced calls, no inbox check, compact Gmail listing, an answer");
     const wander = await turn("test wander");
-    assert.deepEqual(wander.calls.map((c) => c[0]), ["router", "agent", "agent", "agent", "agent", "agent", "agent"], "Five rounds, then one no-tools answer");
+    assert.deepEqual(wander.calls.map((c) => c[0]), ["router", ...Array(13).fill("agent")], "Twelve rounds, then one no-tools answer");
     assert.equal(requests.at(-1).tool_choice, "none");
     const wanderText = wander.events.filter((e) => e.type === "text").map((e) => e.delta).join("");
     assert.match(wanderText, /Here is what I found so far/); assert.match(wanderText, /I stopped early to keep this quick/);

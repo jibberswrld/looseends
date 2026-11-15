@@ -59,9 +59,9 @@ export function Thread({ onOpenTask }: { onOpenTask: (id: string) => void }) {
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
         aria-live="polite"
-        className="max-h-[min(56vh,620px)] overflow-y-auto overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_14px)]"
+        className="max-h-[max(320px,calc(100dvh-260px))] overflow-y-auto overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_14px)]"
       >
-        <div className="space-y-5 px-5 pt-1 pb-5">
+        <div className="space-y-5 px-5 pt-1 pb-5 sm:px-7">
           <AnimatePresence initial={false}>
             {messages.map((m) => (
               <motion.div key={m.id} initial={reduce ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.24, ease }}>

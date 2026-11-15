@@ -78,7 +78,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "text":
-          setMessages((list) => withMessage(list, ev.messageId, (m) => ({ ...m, text: m.text + ev.delta })));
+          setMessages((list) => withMessage(list, ev.messageId, (m) => ({ ...m, text: ev.reset ? ev.delta : m.text + ev.delta })));
           setLiveId(ev.messageId);
           break;
         case "step":

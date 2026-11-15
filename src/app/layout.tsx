@@ -12,7 +12,7 @@ export const metadata: Metadata = {
     template: "%s · LooseEnds",
   },
   description:
-    "Paste a message, email, screenshot or PDF. LooseEnds finds what needs doing, prepares the next step, and keeps you in control.",
+    "Ask about your inbox or tell it what to do. LooseEnds works across Gmail, your calendar and your other apps, gets the next step ready, and sends nothing until you approve.",
   applicationName: "LooseEnds",
   // The share image is src/app/opengraph-image.jpg and twitter-image.jpg (1200x630, a real screenshot).
   openGraph: {

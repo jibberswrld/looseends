@@ -66,6 +66,7 @@ export default function TodayPage() {
   const n = list.length;
   const busy = !!w.running || w.lines.length > 0 || agent.messages.length > 0 || !!agent.notice;
   const empty = !!groups && n === 0;
+  const talking = agent.messages.length > 0 || !!agent.notice;
   const parts = groups ? [groups.overdue.length ? `${groups.overdue.length} overdue` : null, groups.soon.length ? `${groups.soon.length} due this week` : null, groups.later.length ? `${groups.later.length} later` : null].filter(Boolean) : [];
 
   const section = (title: string, tasks: Task[], tone?: "danger") =>
@@ -85,8 +86,9 @@ export default function TodayPage() {
     ) : null;
 
   return (
-    <main className={cx("mx-auto w-full max-w-[760px] px-4 pb-16 sm:px-6", empty && !busy ? "pt-[12vh] lg:pt-[18vh]" : "pt-10 lg:pt-14")}>
-      <header className={cx(empty && "text-center")}>
+    <main className={cx("mx-auto w-full px-4 pb-16 transition-[max-width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none sm:px-6", talking ? "max-w-[960px] pt-5 lg:pt-7" : "max-w-[760px]", talking ? null : empty && !busy ? "pt-[12vh] lg:pt-[18vh]" : "pt-10 lg:pt-14")}>
+      {/* In a conversation the chat is the page: the greeting steps aside and the card takes the width and the height. */}
+      <header className={cx(empty && "text-center", talking && "sr-only")}>
         {empty ? <LogoMark size={40} className="mx-auto mb-5" /> : <p className="mb-2 text-[13.5px] text-muted">{greeting()}{handle ? `, ${handle}` : ""}</p>}
         <h1 className="font-serif text-[38px] leading-[1.1] tracking-[-0.02em] sm:text-[44px]">
           {!groups ? "Getting your list…" : empty ? (open!.length || history?.length ? "You're all caught up." : "What's on your plate?") : `${NUM[n] ?? n} ${n === 1 ? "thing needs" : "things need"} you.`}
@@ -96,7 +98,7 @@ export default function TodayPage() {
         </p>
       </header>
 
-      <div className="mt-7">
+      <div className={cx(!talking && "mt-7")}>
         <Composer hasTasks={n > 0} onOpenTask={showTask} />
       </div>
 

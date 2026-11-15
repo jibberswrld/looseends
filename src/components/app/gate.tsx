@@ -180,7 +180,7 @@ export function Gate({ children }: { children: ReactNode }) {
                 <span className="text-muted">Nothing done without you.</span>
               </h1>
               <p className="mt-3 text-[15px] leading-relaxed text-ink-2">
-                Paste an email, a photo or a PDF, or connect Gmail. LooseEnds finds what you have to do and gets the next step ready.
+                Connect Gmail and ask in plain words. LooseEnds finds what you have to do and gets the next step ready.
               </p>
             </div>
           ) : null}
