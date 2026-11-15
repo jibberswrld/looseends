@@ -94,6 +94,34 @@ try {
   assert.equal((await sql`select status from agent_actions where id = ${recent.id}`)[0].status, "running");
   console.log("PASS five-minute stale-action sweep preserves recent running actions");
   process.env.CONNECTOR_ORIGIN = "http://localhost:4666";
+  // Approval receipts must follow execution status even when the vendor returns a large payload.
+  for (const outcome of ["large", "truncated", "failed", "uncertain"]) {
+    let runs = 0;
+    globalThis.fetch = async (input) => {
+      assert(String(input).endsWith("/run"), "Approvals must not call an AI provider for a second interpretation");
+      runs++;
+      if (outcome === "failed" || outcome === "uncertain") return new Response(JSON.stringify({ error: { code: outcome === "failed" ? "tool_failed" : "connector_error", message: "Fixture execution failed" } }), { status: 502 });
+      return Response.json({ data: outcome === "truncated" ? { truncated: true, error: "Result too large. Request smaller pages or a narrower query." } : { name: "test", html_url: "https://github.com/fixture/test", metadata: "x".repeat(250_000) } });
+    };
+    const before = (await messages(user.id)).length;
+    const action = (await sql`insert into agent_actions (user_id, message_id, app, tool, title, summary, args) values (${user.id}, ${m.id}, 'github', 'GITHUB_CREATE_REPOSITORY', 'Create GitHub repo "test"', '', '{"name":"test"}') returning *`)[0];
+    const events = [];
+    await decideAction(ctx, action.id, "approve", undefined, (e) => events.push(e));
+    const receipt = events.findLast((e) => e.type === "action").action;
+    assert.equal(runs, 1);
+    assert.equal(receipt.status, ["large", "truncated"].includes(outcome) ? "done" : "failed");
+    if (receipt.status === "done") {
+      assert.equal(receipt.result, 'Create GitHub repo "test" completed.');
+      assert.equal(receipt.error, null);
+    } else {
+      assert.equal(receipt.result, null);
+      assert.match(receipt.error, outcome === "uncertain" ? /result is uncertain/ : /Fixture execution failed/);
+    }
+    assert(!events.some((e) => e.type === "message" || e.type === "text"), "Only the action card reports the outcome");
+    assert(events.some((e) => e.type === "done" && e.messageId === m.id));
+    assert.equal((await messages(user.id)).length, before, "No contradictory follow-up is persisted");
+  }
+  console.log("PASS approval cards use confirmed execution status for large, truncated, failed and uncertain results, without another AI call");
   let gmailCalls = 0, holdAI = false;
   globalThis.fetch = async (input, init) => {
     if (String(input).endsWith("/status")) return Response.json({ gmail: true, googlecalendar: false, apps: [{ slug: "gmail", name: "Gmail", connected: true }] });

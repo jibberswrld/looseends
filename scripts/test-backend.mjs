@@ -186,10 +186,13 @@ try {
     const write = await api("/api/agent", "POST", { message: "test connected write" });
     const pending = write.data.find((e) => e.type === "action").action;
     assert.equal(pending.status, "pending"); assert.equal((await (await fetch(`${connector}/mock/calls`)).json()).calls.length, 0);
+    const beforeApproval = requests.length;
     const approvals = await Promise.all([api(`/api/agent/actions/${pending.id}`, "POST", { decision: "approve" }), api(`/api/agent/actions/${pending.id}`, "POST", { decision: "approve" })]);
     assert(approvals.some((r) => r.data.some((e) => e.type === "action" && e.action.status === "done")));
     assert.equal((await (await fetch(`${connector}/mock/calls`)).json()).calls.length, 1);
-    console.log("PASS connected write waits for approval; racing approvals execute once");
+    assert.equal(requests.length, beforeApproval, "Approval confirmation must not call the model");
+    assert(approvals.every((r) => !r.data.some((e) => e.type === "message" || e.type === "text")), "No separate, potentially contradictory confirmation");
+    console.log("PASS connected write waits for approval; racing approvals execute once; confirmation needs no AI call");
     const turn = async (message) => { const from = requests.length; const r = await api("/api/agent", "POST", { message }); return { events: r.data, calls: requests.slice(from).map((q) => [q.job, q.alias]) }; };
     const reply = await turn("Reply to Riverside and confirm Thursday");
     assert.deepEqual(reply.calls, [["router", "publik-fast"], ["agent", "publik-fast"], ["agent", "publik-fast"], ["agent", "publik-fast"]]);
