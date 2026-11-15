@@ -59,7 +59,7 @@ export function Thread({ onOpenTask }: { onOpenTask: (id: string) => void }) {
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
         aria-live="polite"
-        className="max-h-[max(320px,calc(100dvh-260px))] overflow-y-auto overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_14px)]"
+        className="max-h-[max(280px,calc(100dvh-330px))] overflow-y-auto lg:max-h-[max(280px,calc(100dvh-262px))] overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_14px)]"
       >
         <div className="space-y-5 px-5 pt-1 pb-5 sm:px-7">
           <AnimatePresence initial={false}>

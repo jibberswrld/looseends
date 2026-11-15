@@ -208,7 +208,9 @@ async function callTool(ctx: Ctx, m: AgentMessage, call: ToolCall, cache: Map<st
       }
     } else if (name === "list_tasks") {
       const rows = await sql`select t.*, s.title as source_title, s.sender, s.sender_address, s.thread_id, s.kind as source_kind from tasks t left join sources s on s.id = t.source_id where t.user_id = ${ctx.user.id} and t.status not in ('completed', 'dismissed') order by t.due_at nulls last, t.created_at desc limit 100`;
-      result = rows.map((r) => ({ id: r.id, title: r.title, status: r.status, dueAt: r.due_at, nextStep: r.next_step, source: r.source_title, sender: r.sender, senderAddress: r.source_kind === "gmail" ? r.sender_address : null, gmailThreadId: r.source_kind === "gmail" ? r.thread_id : null }));
+      // Due times go to the model in the user's own timezone; raw UTC made it name the wrong day.
+      const due = new Intl.DateTimeFormat("en-US", { timeZone: ctx.user.timezone || "UTC", dateStyle: "full", timeStyle: "short" });
+      result = rows.map((r) => ({ id: r.id, title: r.title, status: r.status, dueAt: r.due_at ? due.format(new Date(r.due_at)) : null, nextStep: r.next_step, source: r.source_title, sender: r.sender, senderAddress: r.source_kind === "gmail" ? r.sender_address : null, gmailThreadId: r.source_kind === "gmail" ? r.thread_id : null }));
       m.taskIds.push(...rows.map((r) => r.id));
     } else if (name === "create_task") {
       const title = a.title as string;
