@@ -1,8 +1,10 @@
+<img src="docs/img/logo.png" alt="LooseEnds" width="96" height="96" />
+
 # LooseEnds
 
-![LooseEnds: the assistant has drafted a reply from your inbox, and it waits for your approval](docs/images/agent.jpg)
-
 **The assistant for the everyday admin that slips through the cracks.**
+
+![LooseEnds: the assistant has drafted a reply to Riverside Dental from your inbox, and it waits for your approval before anything is sent](docs/images/hero.jpg)
 
 Paste an email, a text, a photo or a PDF, or connect Gmail. LooseEnds finds what you actually have to do, shows you the exact sentence it came from, and gets the next step ready: a reply, a calendar event, a reminder, or an action in one of your apps. Nothing is sent, posted, changed or deleted until you approve it.
 
@@ -15,16 +17,26 @@ It's built for the small stuff that piles up:
 ## How it works
 
 ### 1. Drop it in, or ask
-Paste a message, attach a screenshot, a phone photo or a PDF, or connect Gmail and ask LooseEnds to check your inbox. Each task has a plain title, the next step, its due date, and the quote it came from.
+Paste a message, attach a screenshot, a phone photo or a PDF, or connect Gmail and ask LooseEnds to check your inbox. Each task has a plain title, the next step, its due date, and the quote it came from. Keep it, fix it, or throw it out.
+
+![Reviewing what LooseEnds found in a financial aid email: three tasks, each with its due date and the sentence it came from](docs/images/review.jpg)
 
 ### 2. Ask the assistant
 Type what you want in plain words: "What needs a reply?", "Clear out my inbox", "What's on my calendar this week?", "Reply to Riverside and confirm Thursday". The assistant reads your tasks and the apps you connected, answers, and adds or completes tasks.
 
+![The assistant answering "What needs a reply?" with the three people waiting on you](docs/images/assistant.jpg)
+
 ### 3. Approve what goes out
 When something would change the outside world (send an email, post a message, add an event, create or delete something in an app), the assistant puts an approval card in front of you instead. The card shows the readable parts to check and edit (To, Subject, the message) and, under **Details**, every other value that will be sent: ids, links, numbers and nested data. Nothing happens until you press the button. You can also cancel.
 
+Every reply task also has **Draft a reply**: a short draft written only from the message, which you can send with Gmail, save to drafts, copy, or change.
+
+![A drafted reply to Riverside Dental, clearly marked as not sent yet](docs/images/draft.jpg)
+
 ### 4. Come back tomorrow
 Your list is waiting: what needs you now, what's coming later. Finished and dismissed items move to Done, with a receipt of what you sent, copied or downloaded.
+
+![Today: five tasks from your inbox, each with its sender and due day](docs/images/today.jpg)
 
 ## Connected apps
 
@@ -39,7 +51,7 @@ Connecting apps is optional. LooseEnds can connect **Gmail, Google Calendar, Out
 - **Duplicates are caught**, and newsletters and sales emails are recognised as promotions, not obligations.
 - **You control your data.** Delete a task, a message, or everything from Settings. Delete everything also disconnects your apps. See the [privacy page](https://looseends-taupe.vercel.app/privacy) and [terms](https://looseends-taupe.vercel.app/terms).
 
-![The LooseEnds sign-in page](docs/images/gate.jpg)
+![The original email with the sentence behind the task highlighted](docs/images/source.jpg)
 
 ## AI and pricing
 
