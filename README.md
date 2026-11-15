@@ -17,7 +17,7 @@ It's built for the small stuff that piles up:
 ## How it works
 
 ### 1. Drop it in, or ask
-Paste a message, attach a screenshot, a phone photo or a PDF, or connect Gmail and ask LooseEnds to check your inbox. Each task has a plain title, the next step, its due date, and the quote it came from. Keep it, fix it, or throw it out.
+Connect Gmail and ask LooseEnds to check your inbox, or drop in a message, a screenshot, a phone photo or a PDF. Each task has a plain title, the next step, its due date, and the quote it came from. Keep it, fix it, or throw it out.
 
 ![Reviewing what LooseEnds found in a financial aid email: three tasks, each with its due date and the sentence it came from](docs/images/review.jpg)
 
