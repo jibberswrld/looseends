@@ -17,12 +17,15 @@ export interface Provider {
   model: string;
 }
 
-/** Which key pays for this request: the publik install key after "Connect your plan", or the user's own key. */
-export function resolveProvider(session: Row, user: Row): Provider {
+export type Tier = keyof typeof MODELS;
+
+/** Which key pays for this request: the publik install key after "Connect your plan", or the user's own key.
+ * `tier` picks the publik model alias; an own key always uses the model the user configured. */
+export function resolveProvider(session: Row, user: Row, tier: Tier = "balanced"): Provider {
   if (session.ai_choice === "publik") {
     const key = sessionKey(session);
     if (!key) throw new HttpError(401, "gate", "Sign in with publik to continue.");
-    return { kind: "publik", baseURL: session.publik_base_url || DEFAULT_BASE_URL, apiKey: key, model: MODELS.balanced };
+    return { kind: "publik", baseURL: session.publik_base_url || DEFAULT_BASE_URL, apiKey: key, model: MODELS[tier] };
   }
   if (session.ai_choice === "own_key" && user.own_key_enc) {
     return { kind: "own", baseURL: user.own_base_url || OWN_DEFAULT_BASE_URL, apiKey: decrypt(user.own_key_enc), model: user.own_model || OWN_DEFAULT_MODEL };
@@ -48,7 +51,16 @@ export class AiRequestError extends HttpError {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** One OpenAI-compatible chat completion. Returns the assistant text. Throws HttpError with a user-facing message. */
-export async function chat(p: Provider, messages: ChatMessage[], opts: { json?: boolean; maxTokens?: number; temperature?: number } = {}): Promise<string> {
+/** A failed request or stream: the turn's deadline, this call's own timeout, or a real connection failure. Never report a timeout as "not reachable". */
+function transportError(p: Provider, e: unknown): HttpError {
+  if (e instanceof HttpError) return e;
+  checkDeadline();
+  if (e instanceof Error && e.name === "TimeoutError") return new HttpError(504, "ai_timeout", "The AI took too long to answer. Please try again.");
+  return new HttpError(503, "ai_unreachable", p.kind === "publik" ? "publik is not reachable. Check your connection." : "Your AI provider is not reachable right now.");
+}
+
+/** `timeoutMs` (default 60 s) bounds each attempt; `retry: false` makes a single attempt (no retry after a network error, 429 or 5xx). */
+export async function chat(p: Provider, messages: ChatMessage[], opts: { json?: boolean; maxTokens?: number; temperature?: number; timeoutMs?: number; retry?: boolean } = {}): Promise<string> {
   const body = JSON.stringify({
     model: p.model,
     messages,
@@ -59,7 +71,8 @@ export async function chat(p: Provider, messages: ChatMessage[], opts: { json?: 
   if (Buffer.byteLength(body) > MAX_BYTES) {
     throw new HttpError(413, "too_large", "That's too big to read in one go. Try a smaller file or paste the important part.");
   }
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const attempts = opts.retry === false ? 1 : 2;
+  for (let attempt = 0; attempt < attempts; attempt++) {
     checkDeadline();
     let res: Response;
     try {
@@ -67,13 +80,13 @@ export async function chat(p: Provider, messages: ChatMessage[], opts: { json?: 
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${p.apiKey}` },
         body,
-        signal: requestSignal(60_000),
+        signal: requestSignal(opts.timeoutMs ?? 60_000),
       });
     } catch (e) {
       if (e instanceof HttpError) throw e;
       checkDeadline();
-      if (attempt === 0) { await sleep(1500); continue; }
-      throw new HttpError(503, "ai_unreachable", p.kind === "publik" ? "publik is not reachable. Check your connection." : "Your AI provider is not reachable right now. Try again in a moment.");
+      if (attempt < attempts - 1) { await sleep(1500); continue; }
+      throw transportError(p, e);
     }
     const text = await res.text();
     let parsed: Record<string, any> = {}; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -88,7 +101,7 @@ export async function chat(p: Provider, messages: ChatMessage[], opts: { json?: 
       const t = topUpUrlFrom402(parsed);
       throw new AiRequestError(402, "payment_required", t.message, text.slice(0, 500), t.url);
     }
-    if ((res.status === 429 || res.status >= 500) && attempt === 0) { await sleep(1500); continue; }
+    if ((res.status === 429 || res.status >= 500) && attempt < attempts - 1) { await sleep(1500); continue; }
     const detail = parsed.error?.message ?? text.slice(0, 300);
     if (res.status === 401 || res.status === 403) {
       if (p.kind === "own") throw new AiRequestError(401, "own_key_invalid", "Your own AI key was rejected. Update it in Settings.", detail);
@@ -104,19 +117,20 @@ export async function chat(p: Provider, messages: ChatMessage[], opts: { json?: 
 /** OpenAI-compatible streaming tool call. Text is sent to the caller as it arrives. */
 export async function streamChat(
   p: Provider, messages: ChatMessage[], tools: { type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } }[],
-  onText: (delta: string) => void, opts: { maxTokens?: number; toolChoice?: "none" } = {},
+  onText: (delta: string) => void, opts: { maxTokens?: number; toolChoice?: "none"; timeoutMs?: number; stream?: boolean } = {},
 ): Promise<{ content: string; toolCalls: ToolCall[] }> {
-  const body = JSON.stringify({ model: p.model, messages, tools, stream: true, temperature: 0.2, max_tokens: opts.maxTokens ?? 1800, ...(opts.toolChoice ? { tool_choice: opts.toolChoice } : {}) });
+  // stream: false asks for one JSON answer. publik-fast stalls mid tool call when streamed (verified against the live
+  // API: the stream opens a tool call and never sends its arguments or [DONE]), while the same request unstreamed returns at once.
+  const stream = opts.stream ?? !(p.kind === "publik" && p.model === MODELS.fast);
+  const body = JSON.stringify({ model: p.model, messages, tools, stream, temperature: 0.2, max_tokens: opts.maxTokens ?? 1800, ...(opts.toolChoice ? { tool_choice: opts.toolChoice } : {}) });
   if (Buffer.byteLength(body) > MAX_BYTES) throw new HttpError(413, "too_large", "That conversation is too large. Start a new chat.");
   let res: Response;
   try {
     res = await providerFetch(p, `${p.baseURL.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${p.apiKey}` }, body, signal: requestSignal(90_000),
+      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${p.apiKey}` }, body, signal: requestSignal(opts.timeoutMs ?? 90_000),
     });
   } catch (e) {
-    if (e instanceof HttpError) throw e;
-    checkDeadline();
-    throw new HttpError(503, "ai_unreachable", p.kind === "publik" ? "publik is not reachable. Check your connection." : "Your AI provider is not reachable right now.");
+    throw transportError(p, e);
   }
   if (!res.ok) {
     const raw = await res.text();
@@ -132,12 +146,25 @@ export async function streamChat(
     if (res.status >= 500) throw new AiRequestError(503, "ai_unavailable", "The AI is having trouble right now. Please try again in a minute.", detail);
     throw new AiRequestError(502, "ai_error", "The AI couldn't process this. Please try again.", detail);
   }
+  if (!stream) {
+    let message: { content?: unknown; tool_calls?: unknown } | undefined;
+    try { message = ((await res.json()) as { choices?: { message?: typeof message }[] }).choices?.[0]?.message; } catch (e) { throw transportError(p, e); }
+    const content = typeof message?.content === "string" ? message.content : "";
+    const toolCalls = (Array.isArray(message?.tool_calls) ? message.tool_calls : []).map((c: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+      id: String(c?.id ?? ""), type: "function" as const,
+      function: { name: String(c?.function?.name ?? ""), arguments: typeof c?.function?.arguments === "string" ? c.function.arguments : JSON.stringify(c?.function?.arguments ?? {}) },
+    }));
+    if (content) onText(content);
+    return { content, toolCalls };
+  }
   if (!res.body) throw new HttpError(502, "ai_error", "The AI returned an empty answer. Please try again.");
   const reader = res.body.getReader(), decoder = new TextDecoder();
   let buffer = "", content = "";
   const calls = new Map<number, ToolCall>();
+  let finished = false; // the provider said it is done; some keep the connection open afterwards
   const consume = (line: string) => {
-    if (!line.startsWith("data: ") || line === "data: [DONE]") return;
+    if (line === "data: [DONE]") { finished = true; return; }
+    if (!line.startsWith("data: ")) return;
     let data: any; // eslint-disable-line @typescript-eslint/no-explicit-any
     try { data = JSON.parse(line.slice(6)); } catch { return; }
     const delta = data.choices?.[0]?.delta;
@@ -151,12 +178,17 @@ export async function streamChat(
       calls.set(index, call);
     }
   };
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n"); buffer = lines.pop() ?? "";
-    for (const line of lines) consume(line.trimEnd());
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n"); buffer = lines.pop() ?? "";
+      for (const line of lines) consume(line.trimEnd());
+      if (finished) { void reader.cancel().catch(() => {}); break; }
+    }
+  } catch (e) {
+    throw transportError(p, e); // the stream was cut: a timeout mid-answer is still a timeout
   }
   if (buffer) consume(buffer.trimEnd());
   return { content, toolCalls: [...calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call) };

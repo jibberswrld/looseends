@@ -86,8 +86,9 @@ createServer(async (req, res) => {
       if (!UPSTREAM) return send(res, 503, { error: { message: "mock has no upstream" } });
       const b = JSON.parse(await readBody(req));
       console.log(`[mock] chat model=${b.model} msgs=${b.messages?.length}`);
+      const alias = b.model; // publik-fast / -balanced / -smart, passed on so test upstreams can see which tier was asked for
       b.model = UPSTREAM_MODEL;
-      const up = await fetch(`${UPSTREAM}/chat/completions`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${UPSTREAM_KEY}` }, body: JSON.stringify(b) });
+      const up = await fetch(`${UPSTREAM}/chat/completions`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${UPSTREAM_KEY}`, "x-publik-model": String(alias) }, body: JSON.stringify(b) });
       res.writeHead(up.status, { "content-type": "application/json", "x-publik-charge-micros": "1000" });
       return res.end(await up.text());
     }
