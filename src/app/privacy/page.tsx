@@ -13,7 +13,7 @@ const SECTIONS: [string, string[]][] = [
       "The text of messages you paste, the text read from screenshots, and the text extracted from PDFs. Image and PDF files themselves are not kept.",
       "When it checks your inbox or reads an email you point it to, the sender, subject and body of each email it reads (up to about 8,000 characters per message). To choose which recent emails to read, it first looks at the sender, subject, date and a short preview of up to about 25 of them; for the ones it passes over it keeps only the sender and subject, so it doesn't look at them again.",
       "The tasks, drafts, calendar events and reminders created from them, and receipts of what you did with them.",
-      "Your conversation with the assistant, and the details of every action it proposes: which app, what it would do, and every value it would send.",
+      "Your conversations with the assistant, the tasks and results of agents you launch, and the details of every action it proposes: which app, what it would do, and every value it would send.",
       "Your publik handle, time zone, and simple usage events (without message content).",
       "All of this is stored in LooseEnds' database. Your publik install key and any AI key you provide are encrypted there.",
     ],

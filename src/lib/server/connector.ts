@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import type { ConnectorApp, Toolkit } from "@/lib/types";
-import { connectionStatus, connectorCaller, connectorSession, parseToolkit, slimEmails, toolMetadata, upstream, type ConnectorTool } from "./composio";
+import { connectionStatus, connectorCaller, connectorSession, parseToolkit, slimEmails, toolMetadata, toolFailure, upstream, type ConnectorTool } from "./composio";
 import { requestSignal } from "./deadline";
 import { HttpError } from "./http";
 import { requireReady } from "./session";
@@ -89,7 +89,7 @@ async function call<T>(path: string, body: Record<string, unknown> | null, timeo
         const args = body?.arguments as Record<string, unknown>;
         executing = true;
         const result = await session.execute(meta.slug, meta.toolkit === "gmail" ? { ...args, user_id: "me" } : args, undefined, { signal });
-        if (result.resultType !== "completed") throw new HttpError(502, "tool_failed", "The connected app couldn't complete that. Please try again.");
+        if (result.resultType !== "completed") throw new HttpError(502, "tool_failed", toolFailure(result.error));
         const output = tool === "GMAIL_FETCH_EMAILS" ? slimEmails(result.data) : result.data;
         const serialized = JSON.stringify(output);
         const limit = tool === "GMAIL_FETCH_EMAILS" ? 1_000_000 : 200_000;

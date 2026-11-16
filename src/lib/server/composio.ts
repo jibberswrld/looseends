@@ -95,3 +95,10 @@ export function slimEmails(data: Record<string, unknown>): Record<string, unknow
     }),
   };
 }
+
+/** Show the provider's useful rejection, excluding diagnostics and credential-bearing errors. */
+export function toolFailure(error: string | null): string {
+  const message = error?.trim();
+  if (!message || /token|authorization|api.?key|secret|password|traceback|bearer/i.test(message)) return "The connected app rejected this action. Check its destination and your connection, then try again.";
+  return message.slice(0, 800);
+}

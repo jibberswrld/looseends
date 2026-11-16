@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { CaretRight, ClockCounterClockwise, GearSix, House, Plus, type Icon } from "@phosphor-icons/react";
+import { CaretRight, ClockCounterClockwise, GearSix, House, Robot, type Icon } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import type { Action, ConnectorApp, Task } from "@/lib/types";
 import { Wordmark } from "../brand";
@@ -74,7 +74,7 @@ function Apps() {
 
 const NAV: { href: string; label: string; icon: Icon }[] = [
   { href: "/", label: "Today", icon: House },
-  { href: "/capture", label: "Add", icon: Plus },
+  { href: "/agents", label: "Agents", icon: Robot },
   { href: "/history", label: "Done", icon: ClockCounterClockwise },
 ];
 
@@ -137,14 +137,8 @@ export function Shell({ children }: { children: ReactNode }) {
                 aria-current={active ? "page" : undefined}
                 className={cx("flex h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium", active ? "text-ink" : "text-muted")}
               >
-                {n.href === "/capture" ? (
-                  <span className="inline-flex size-9 items-center justify-center rounded-lg bg-accent text-accent-ink">
-                    <Plus size={20} weight="bold" />
-                  </span>
-                ) : (
-                  <n.icon size={22} weight={active ? "fill" : "regular"} />
-                )}
-                {n.href === "/capture" ? null : n.label}
+                <n.icon size={22} weight={active ? "fill" : "regular"} />
+                {n.label}
               </Link>
             );
           })}

@@ -242,3 +242,12 @@ export interface AskAnswer {
   answer: string; // short plain text
   taskIds: string[]; // tasks the answer refers to, in order
 }
+
+export interface AgentRun {
+  id: string;
+  task: string;
+  status: "running" | "completed" | "needs_approval" | "failed";
+  error: string | null;
+  topUpUrl: string | null;
+  createdAt: string;
+}
