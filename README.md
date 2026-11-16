@@ -38,6 +38,10 @@ Your list is waiting: what needs you now, what's coming later. Finished and dism
 
 ![Today: five tasks from your inbox, each with its sender and due day](docs/images/today.jpg)
 
+## Agents
+
+Open **Agents**, describe a task, and select **Spawn agent**. Each agent works independently while you use another page. Reopen it to see its progress, results, and approval cards. You can run several at once; connected-app actions still wait for your approval. Runs have the same time limit as chat, and an interrupted run is shown as failed.
+
 ## Connected apps
 
 Connecting apps is optional. LooseEnds can connect **Gmail, Google Calendar, Outlook, Slack, Notion, Google Drive, Google Docs, Google Sheets, GitHub, Linear and Todoist**. Connections are made and held by [Composio](https://composio.dev); you can disconnect any app in Settings.

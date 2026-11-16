@@ -181,3 +181,21 @@ create table if not exists rate_limits (
   primary key (user_id, bucket)
 );
 -- statement-breakpoint
+
+create table if not exists agent_runs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  task text not null,
+  status text not null default 'running',
+  error text,
+  top_up_url text,
+  created_at timestamptz not null default now(),
+  finished_at timestamptz
+);
+-- statement-breakpoint
+create index if not exists agent_runs_user_time_idx on agent_runs(user_id, created_at);
+-- statement-breakpoint
+alter table agent_messages add column if not exists run_id uuid references agent_runs(id) on delete cascade;
+-- statement-breakpoint
+create index if not exists agent_messages_run_idx on agent_messages(run_id);
+-- statement-breakpoint

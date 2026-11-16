@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { AgentAction, AgentEvent, AgentMessage } from "@/lib/types";
+import type { AgentAction, AgentEvent, AgentMessage, AgentRun } from "@/lib/types";
 import { api, ApiFailure, streamNdjson } from "./api";
 import { reportError, useStore } from "./store";
 import { useWork } from "./work";
@@ -39,7 +39,7 @@ function withMessage(list: AgentMessage[], id: string, fn: (m: AgentMessage) => 
   return list.some((m) => m.id === id) ? list.map((m) => (m.id === id ? fn(m) : m)) : [...list, fn(blank(id, "assistant"))];
 }
 
-export function AgentProvider({ children }: { children: ReactNode }) {
+export function AgentProvider({ children, runId }: { children: ReactNode; runId?: string }) {
   const { upsertMany } = useStore();
   const { setConnections } = useWork();
   const [messages, setMessages] = useState<AgentMessage[]>([]);
@@ -49,17 +49,26 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const [notice, setNotice] = useState<AgentNotice | null>(null);
   const seq = useRef(0);
   const inFlight = useRef(false);
+  const watching = useRef(true);
 
   useEffect(() => {
     let live = true;
-    api<{ messages: AgentMessage[] }>("/api/agent")
-      .then((r) => live && setMessages(r.messages ?? []))
-      .catch(() => {}) // no history yet is the same as an empty conversation
+    const load = () => api<{ messages: AgentMessage[]; run?: AgentRun }>(runId ? `/api/agents/${runId}` : "/api/agent")
+      .then((r) => {
+        if (!live || inFlight.current) return;
+        setMessages(r.messages ?? []);
+        if (runId) {
+          watching.current = r.run?.status === "running" || r.messages.some((m) => m.actions.some((a) => a.status === "pending" || a.status === "running"));
+          setBusy(r.run?.status === "running");
+          setNotice(r.run?.error ? { message: r.run.error, topUpUrl: r.run.topUpUrl } : null);
+        }
+      })
+      .catch((e) => { if (live) setNotice({ message: e instanceof Error ? e.message : "Couldn't load this conversation.", topUpUrl: null }); })
       .finally(() => live && setLoaded(true));
-    return () => {
-      live = false;
-    };
-  }, []);
+    void load();
+    const timer = runId ? setInterval(() => { if (watching.current && !inFlight.current && document.visibilityState === "visible") void load(); }, 2000) : undefined;
+    return () => { live = false; clearInterval(timer); };
+  }, [runId]);
 
   const apply = useCallback(
     (ev: AgentEvent) => {
@@ -130,11 +139,11 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const send = useCallback(
     async (text: string) => {
       const t = text.trim();
-      if (!t || !loaded || inFlight.current) return;
+      if (runId || !t || !loaded || inFlight.current) return;
       setMessages((list) => [...list, blank(`${LOCAL}${++seq.current}`, "user", t)]);
       await run("/api/agent", { message: t }, () => {});
     },
-    [run, loaded],
+    [run, loaded, runId],
   );
 
   const setStatus = (id: string, status: AgentAction["status"]) =>

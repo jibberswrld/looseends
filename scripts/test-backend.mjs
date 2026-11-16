@@ -47,6 +47,11 @@ const fakeAI = createServer(async (req, res) => {
     const tier = request.startsWith("Reply to Riverside") || request === "test fast malformed" ? "fast" : "balanced";
     return json(res, { choices: [{ message: { content: JSON.stringify({ tier, needsRead: request.includes("50 emails") || request === "test no evidence" || request === "test oversized read" || request === "What needs a reply?" }) } }] });
   }
+  if (system.startsWith("Check whether this proposed external action")) {
+    b.job = "destination";
+    const { proposal } = JSON.parse(b.messages[1].content);
+    return json(res, { choices: [{ message: { content: JSON.stringify({ ready: proposal.arguments.owner !== "your_github_username", reason: "Look up the actual repository owner before creating this file." }) } }] });
+  }
   if (!agentJob) {
     if (String(b.messages[0].content).includes("sort a person's recent emails")) {
       // Inbox triage sees metadata only; this stand-in picks the senders a person is waiting on.
@@ -79,6 +84,10 @@ const fakeAI = createServer(async (req, res) => {
   if (b.tool_choice !== "none") {
     if (user === "test no evidence") {
       content = "I checked your email: Jira sent a migration notice.";
+    } else if (user === "test placeholder destination") {
+      if (last.role === "user") calls = [tool("find_tools", { query: "github file" })];
+      else if (!b.messages.some((m) => m.tool_calls?.some((t) => t.function.name === "run_tool"))) calls = [tool("run_tool", { tool: "GITHUB_CREATE_OR_UPDATE_FILE_CONTENTS", arguments: { owner: "your_github_username", repo: "test", path: "snake.py", content: "print('snake')", message: "Add snake" } })];
+      else content = "Which repository should I use?";
     } else if (user.includes("50 emails")) {
       const results = b.messages.filter((m) => m.role === "tool").map((m) => JSON.parse(m.content));
       const pages = results.filter((r) => Array.isArray(r.messages));
@@ -154,7 +163,7 @@ try {
     assert.equal((await api("/api/gate")).data.state, "choose");
     assert.equal((await api("/api/gate/choice", "POST", { choice: "publik" })).data.state, "ready");
     console.log("PASS mock Publik sign-in and cookieless API denial");
-    for (const app of ["gmail", "slack"]) {
+    for (const app of ["gmail", "slack", "github"]) {
       const link = await api("/api/connections/link", "POST", { toolkit: app }); assert.equal(link.status, 200);
       await fetch(link.data.url);
     }
@@ -183,6 +192,11 @@ try {
     assert.equal(JSON.parse(oversizedResult.content).truncated, true);
     await fetch(`${connector}/mock/email-count/0`);
     console.log("PASS 50-message reads preserve valid JSON above 12KB, paginate, and suppress unsupported email claims");
+    const rejected = await api("/api/agent", "POST", { message: "test placeholder destination" });
+    assert(!rejected.data.some((e) => e.type === "action"), "Placeholder destination must not reach approval");
+    assert.match(texts(rejected), /Which repository/);
+    assert(requests.some((r) => r.job === "destination" && JSON.parse(r.messages[1].content).proposal.arguments.owner === "your_github_username"));
+    console.log("PASS invented GitHub destination is rejected before an approval card or external write");
     const write = await api("/api/agent", "POST", { message: "test connected write" });
     const pending = write.data.find((e) => e.type === "action").action;
     assert.equal(pending.status, "pending"); assert.equal((await (await fetch(`${connector}/mock/calls`)).json()).calls.length, 0);
@@ -195,7 +209,7 @@ try {
     console.log("PASS connected write waits for approval; racing approvals execute once; confirmation needs no AI call");
     const turn = async (message) => { const from = requests.length; const r = await api("/api/agent", "POST", { message }); return { events: r.data, calls: requests.slice(from).map((q) => [q.job, q.alias]) }; };
     const reply = await turn("Reply to Riverside and confirm Thursday");
-    assert.deepEqual(reply.calls, [["router", "publik-fast"], ["agent", "publik-fast"], ["agent", "publik-fast"], ["agent", "publik-fast"]]);
+    assert.deepEqual(reply.calls, [["router", "publik-fast"], ["agent", "publik-fast"], ["agent", "publik-fast"], ["destination", "publik-balanced"], ["agent", "publik-fast"]]);
     const replyCard = reply.events.find((e) => e.type === "action").action;
     assert.equal(replyCard.tool, "GMAIL_SEND_EMAIL"); assert.equal(replyCard.status, "pending");
     await api(`/api/agent/actions/${replyCard.id}`, "POST", { decision: "cancel" });
@@ -267,6 +281,57 @@ try {
     assert.match(wanderText, /Here is what I found so far/); assert.match(wanderText, /I stopped early to keep this quick/);
     assert(!wander.events.some((e) => e.type === "error"));
     console.log("PASS a turn that hits the round cap still answers from what it read, with an honest note");
+    const mainBeforeAgents = (await api("/api/agent")).data.messages;
+    const spawned = await Promise.all([api("/api/agents", "POST", { task: "test connected read" }), api("/api/agents", "POST", { task: "test connected write" })]);
+    assert(spawned.every((r) => r.status === 202));
+    assert.equal(new Set(spawned.map((r) => r.data.run.id)).size, 2);
+    const finished = [];
+    for (const response of spawned) {
+      let detail;
+      for (let attempt = 0; attempt < 40; attempt++) {
+        detail = await api(`/api/agents/${response.data.run.id}`);
+        if (detail.data.run.status !== "running") break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      assert.notEqual(detail.data.run.status, "running");
+      assert.equal(detail.data.messages.filter((m) => m.role === "user").length, 1);
+      assert.equal(detail.data.messages[0].text, response.data.run.task);
+      finished.push(detail.data);
+    }
+    assert.equal(finished[0].run.status, "completed"); assert.equal(finished[1].run.status, "needs_approval");
+    assert.deepEqual((await api("/api/agent")).data.messages, mainBeforeAgents, "Agents have independent chat histories");
+    const agentCard = finished[1].messages.flatMap((m) => m.actions)[0];
+    assert.equal(agentCard.status, "pending");
+    const acted = await api(`/api/agent/actions/${agentCard.id}`, "POST", { decision: "approve" });
+    assert(acted.data.some((e) => e.type === "action" && e.action.status === "done"));
+    assert.equal((await api(`/api/agents/${finished[1].run.id}`)).data.run.status, "completed");
+    await api("/api/agent", "DELETE");
+    assert.equal((await api(`/api/agents/${finished[0].run.id}`)).data.messages.length, finished[0].messages.length, "New main chat preserves agent results");
+    const ownerCookie = cookie; cookie = "";
+    assert.equal((await api("/api/agents")).status, 401);
+    const otherGate = await api("/api/gate", "POST");
+    await fetch(`${otherGate.data.claimUrl}?handle=otheragentuser`);
+    await api("/api/gate"); await api("/api/gate/choice", "POST", { choice: "publik" });
+    assert.equal((await api("/api/agents")).data.runs.length, 0);
+    assert.equal((await api(`/api/agents/${finished[0].run.id}`)).status, 404);
+    assert.equal((await api(`/api/agent/actions/${agentCard.id}`, "POST", { decision: "approve" })).data[0].code, "not_found");
+    await api("/api/me", "DELETE"); cookie = ownerCookie;
+    assert.equal((await api("/api/agents", "POST", { task: " " })).status, 400);
+    console.log("PASS concurrent background agents, persisted isolated histories, approvals, reset isolation, and cross-user denial");
+    await fetch(`http://localhost:${publikPort}/mock/402/on`);
+    const failingRun = await api("/api/agents", "POST", { task: "test connected read" });
+    assert.equal(failingRun.status, 202);
+    let failedRun;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      failedRun = (await api(`/api/agents/${failingRun.data.run.id}`)).data;
+      if (failedRun.run.status !== "running") break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.equal(failedRun.run.status, "failed");
+    assert.match(failedRun.run.error, /balance is empty/);
+    assert.match(failedRun.run.topUpUrl, /wallet/);
+    await fetch(`http://localhost:${publikPort}/mock/402/off`);
+    console.log("PASS a background AI failure persists its error and top-up link instead of staying working");
     const before = (await api("/api/tasks")).data.tasks;
     const local = await api("/api/agent", "POST", { message: "test local limits" });
     assert(!local.data.some((e) => e.type === "action"), "Adding tasks, finding to-dos and checking the inbox run without approval cards");
@@ -303,7 +368,7 @@ try {
     assert(state.apps.every((a) => !a.connected)); assert.equal((await api("/api/me")).status, 401);
     await stopApp();
     const pg = await PGlite.create(join(dir, "db"));
-    for (const table of ["users", "sessions", "sources", "tasks", "actions", "agent_messages", "agent_actions", "events", "rate_limits"]) assert.equal((await pg.query(`select count(*)::int as n from ${table}`)).rows[0].n, 0);
+    for (const table of ["users", "sessions", "sources", "tasks", "actions", "agent_messages", "agent_actions", "agent_runs", "events", "rate_limits"]) assert.equal((await pg.query(`select count(*)::int as n from ${table}`)).rows[0].n, 0);
     await pg.close();
     console.log("PASS deletion failure preserves account; success disconnects every mock app and cascades all user data");
   }

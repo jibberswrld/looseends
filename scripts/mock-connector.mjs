@@ -17,6 +17,7 @@ const APPS = [
   ["googlesheets", "Google Sheets"], ["github", "GitHub"], ["linear", "Linear"], ["todoist", "Todoist"],
 ];
 const TOOLS = [
+  ["GITHUB_CREATE_OR_UPDATE_FILE_CONTENTS", "github", "Create file", false, { owner: { type: "string" }, repo: { type: "string" }, path: { type: "string" }, content: { type: "string" }, message: { type: "string" } }],
   ["GMAIL_FETCH_EMAILS", "gmail", "Fetch emails", true, { query: { type: "string" }, max_results: { type: "integer" }, page_token: { type: "string" } }],
   ["GMAIL_CREATE_EMAIL_DRAFT", "gmail", "Create email draft", false, { recipient_email: { type: "string" }, subject: { type: "string" }, body: { type: "string" } }],
   ["GMAIL_REPLY_TO_THREAD", "gmail", "Reply to thread", false, { thread_id: { type: "string" }, message_body: { type: "string" } }],

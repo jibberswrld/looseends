@@ -13,14 +13,14 @@ assert(!process.env.DATABASE_URL && !process.env.COMPOSIO_API_KEY && !process.en
 const scratch = await mkdtemp(join(tmpdir(), "looseends-connector-"));
 const compile = (source) => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText.replace(/from "\.\/([^".]+)"/g, 'from "./$1.mjs"');
 const calls = [], deleted = [];
-let failDelete = false, failTool = false, emailCount = 1;
+let failDelete = false, failTool = false, emailCount = 1, toolError = "Repository not found: 'your_github_username/test'.";
 globalThis.__sdkFixture = {
   async create(userId, _config, options) { assert(options.signal); calls.push(userId); return new globalThis.__sdkFixture.Session(); },
   Session: class {
     async toolkits(_options, request) { assert(request.signal); return { items: [{ slug: "gmail", name: "Gmail", connection: { isActive: true } }] }; }
     async authorize(_toolkit, options, request) { assert(request.signal); assert.match(options.callbackUrl, /\/connected\?app=gmail$/); return { redirectUrl: "https://authorize.example.test" }; }
     async search(_query, request) { assert(request.signal); return { results: [{ primaryToolSlugs: ["GMAIL_FETCH_EMAILS"], relatedToolSlugs: [] }] }; }
-    async execute(slug, args, _options, request) { assert(request.signal); calls.push({ slug, args }); return failTool ? { resultType: "failed", error: "sensitive vendor error must never be logged" } : { resultType: "completed", data: { messages: Array.from({ length: emailCount }, (_, i) => ({ messageId: `mail-${i}`, messageText: "Fixture email ".repeat(600), payload: {}, attachmentList: [] })) } }; }
+    async execute(slug, args, _options, request) { assert(request.signal); calls.push({ slug, args }); return failTool ? { resultType: "failed", error: toolError } : { resultType: "completed", data: { messages: Array.from({ length: emailCount }, (_, i) => ({ messageId: `mail-${i}`, messageText: "Fixture email ".repeat(600), payload: {}, attachmentList: [] })) } }; }
   },
   tools: { async getRawComposioToolBySlug(slug, _options, request) { assert(request.signal); return { slug, name: "Fixture", toolkit: { slug: slug === "FORBIDDEN" ? "unsupported" : "gmail" }, inputParameters: { type: "object" }, tags: ["readOnlyHint"] }; } },
   connectedAccounts: {
@@ -62,7 +62,13 @@ try {
     const oversized = await connector.connectorRun("GMAIL_FETCH_EMAILS", { max_results: 200 });
     assert(oversized.ok); assert.equal(oversized.data.data.truncated, true);
     assert.equal(oversized.data.data.result, undefined, "Do not return incomplete JSON as evidence");
-    failTool = true; assert.equal((await connector.connectorRun("GMAIL_FETCH_EMAILS", {})).code, "tool_failed");
+    failTool = true;
+    const rejection = await connector.connectorRun("GMAIL_FETCH_EMAILS", {});
+    assert.equal(rejection.code, "tool_failed"); assert.equal(rejection.message, toolError); assert.equal(rejection.maybeDone, false);
+    toolError = "Authorization Bearer private-fixture-value";
+    assert(!(await connector.connectorRun("GMAIL_FETCH_EMAILS", {})).message.includes("private-fixture-value"));
+    toolError = null;
+    assert.equal((await connector.connectorRun("GMAIL_FETCH_EMAILS", {})).ok, false, "A failed execution with no error is still a failure");
     assert((await connector.connectorDisconnectAll()).ok); assert.deepEqual(deleted, ["first-page", "second-page"]);
     failDelete = true;
     const oldError = console.error; const errors = []; console.error = (...args) => errors.push(args.join(" "));
